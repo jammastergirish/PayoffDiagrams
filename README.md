@@ -16,6 +16,8 @@ OPTIONAL COLUMNS:
 - Underlying Price: Underlying stock price for options (if provided, used directly;
   otherwise estimated from option prices)
 
+You'll need to split up strategies: File->Global Configuration->Display->Ticker Row->Complex (Multi-Leg Positions)->Hide Complex Positions
+
 The code automatically handles any additional columns (Market Value, Unrealized P&L,
 Daily P&L, Delta, Gamma, Vega, Theta, etc.) but doesn't require them.
 
