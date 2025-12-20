@@ -1,4 +1,6 @@
-# Payoff Diagram generator
+# Payoff Diagram Generator
+
+<img width="214" height="186" alt="PNG image" src="https://github.com/user-attachments/assets/6d47552c-3fca-40be-aaf0-4f02c19cb518" />
 
 Parses Interactive Brokers TWS CSV export and generates payoff diagrams for each ticker,
 properly combining stock and options positions.
