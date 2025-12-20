@@ -21,4 +21,4 @@ You'll need to split up strategies: File->Global Configuration->Display->Ticker 
 The code automatically handles any additional columns (Market Value, Unrealized P&L,
 Daily P&L, Delta, Gamma, Vega, Theta, etc.) but doesn't require them.
 
-Usage: `uv run main.py positions.csv`
+Usage: `uv run main.py [CSV file] [image file]`
