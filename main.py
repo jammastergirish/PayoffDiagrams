@@ -325,7 +325,7 @@ def plot_ticker_pnl(
             bbox={"boxstyle": 'round', "facecolor": 'wheat', "alpha": 0.5})
 
 
-def main(csv_path: str, output_path: str = 'all_positions_pnl.png'):
+def main(csv_path: str, output_path: str = 'payoffdiagrams.png'):
     """Generate combined P&L chart for all tickers."""
     positions, stock_prices, is_estimated = load_positions(csv_path)
 
