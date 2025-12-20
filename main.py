@@ -279,8 +279,20 @@ def plot_ticker_pnl(
     prices = get_price_range(ticker_positions, current_price)
     pnl = calculate_pnl(ticker_positions, prices)
 
-    ax.plot(prices, pnl, 'b-', linewidth=2, label='P&L at Expiration')
-    ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
+    # Add colored backgrounds: light green above 0, light red below 0
+    # Calculate y-range with padding for the background spans
+    pnl_min, pnl_max = min(pnl), max(pnl)
+    y_padding = max(abs(pnl_min), abs(pnl_max)) * 0.15
+    y_min = pnl_min - y_padding
+    y_max = pnl_max + y_padding
+
+    # Add background colors (will be clipped to plot area automatically)
+    ax.axhspan(0, y_max, alpha=0.2, color='lightgreen', zorder=0)
+    ax.axhspan(y_min, 0, alpha=0.2, color='lightcoral', zorder=0)
+
+    ax.plot(prices, pnl, 'b-', linewidth=2,
+            label='P&L at Expiration', zorder=2)
+    ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, zorder=1)
     if is_estimated:
         ax.axvline(x=current_price, color='orange', linestyle=':', linewidth=1.5,
                    label=f'Est. Price: ${current_price:.2f}')
