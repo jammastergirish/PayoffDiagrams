@@ -242,17 +242,34 @@ def load_positions(
 
 
 def calculate_pnl(positions: List[Position], prices: np.ndarray) -> np.ndarray:
-    """Calculate total P&L across all positions for a range of prices."""
+    """Calculate total P&L across all positions for a range of prices.
+
+    For options:
+    - Long positions (qty > 0): cost_basis is positive (premium paid)
+      P&L = (intrinsic - cost_basis) * qty * 100
+    - Short positions (qty < 0): cost_basis is negative (premium received)
+      P&L = (premium_received - intrinsic_paid) * |qty| * 100
+      = (-cost_basis - intrinsic) * |qty| * 100
+      = (cost_basis + intrinsic) * qty * 100  (since qty < 0, |qty| = -qty)
+    """
     total_pnl = np.zeros_like(prices)
     for pos in positions:
         if pos.position_type == 'stock':
             total_pnl += (prices - pos.cost_basis) * pos.qty
         elif pos.position_type == 'call':
             intrinsic = np.maximum(0, prices - pos.strike)
-            total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
+            if pos.qty > 0:  # Long position
+                total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
+            else:  # Short position
+                # Premium received is -cost_basis, intrinsic paid is intrinsic
+                total_pnl += (pos.cost_basis + intrinsic) * pos.qty * 100
         else:  # put
             intrinsic = np.maximum(0, pos.strike - prices)
-            total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
+            if pos.qty > 0:  # Long position
+                total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
+            else:  # Short position
+                # Premium received is -cost_basis, intrinsic paid is intrinsic
+                total_pnl += (pos.cost_basis + intrinsic) * pos.qty * 100
     return total_pnl
 
 
@@ -271,10 +288,18 @@ def plot_ticker_pnl(
     positions: List[Position], ticker: str, current_price: float,
     is_estimated: bool, ax
 ):
-    """Plot P&L curve for a single ticker."""
+    """Plot P&L curve for a single ticker.
+
+    Shows P&L at the latest expiration date. Earlier-expiring options
+    are assumed to be settled at their intrinsic value at that date.
+    """
     ticker_positions = [p for p in positions if p.ticker == ticker]
     if not ticker_positions:
         return
+
+    # Find the latest expiration date
+    expiries = [p.expiry for p in ticker_positions if p.expiry]
+    latest_expiry = max(expiries) if expiries else None
 
     prices = get_price_range(ticker_positions, current_price)
     pnl = calculate_pnl(ticker_positions, prices)
@@ -300,18 +325,51 @@ def plot_ticker_pnl(
         ax.axvline(x=current_price, color='orange', linestyle='--', linewidth=1.5,
                    label=f'Current: ${current_price:.2f}')
 
+    # Format expiration date for display
+    def format_expiry(expiry_str):
+        if not expiry_str:
+            return None
+        # Return as-is if already in YYYY-MM-DD format, otherwise try to parse
+        if expiry_str and len(expiry_str) == 10 and expiry_str[4] == '-' and expiry_str[7] == '-':
+            return expiry_str
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(expiry_str, '%Y-%m-%d')
+            return dt.strftime('%Y-%m-%d')
+        except:
+            return expiry_str
+
     for pos in ticker_positions:
         if pos.strike:
             color = 'green' if pos.position_type == 'call' else 'red'
             ax.axvline(x=pos.strike, color=color,
                        linestyle=':' if pos.qty < 0 else '-', alpha=0.5)
 
+            # Add expiration date label if available
+            if pos.expiry:
+                expiry_label = format_expiry(pos.expiry)
+                if expiry_label:
+                    # Position text to the right of the strike line, vertically centered
+                    # Use a small offset from the strike price
+                    x_offset = (max(prices) - min(prices)) * \
+                        0.01  # 1% of price range
+                    y_pos = (y_min + y_max) / 2  # Center vertically
+                    ax.text(pos.strike + x_offset, y_pos, expiry_label,
+                            rotation=90, ha='left', va='center',
+                            fontsize=7, color=color, alpha=0.7)
+
     current_pnl = calculate_pnl(ticker_positions, np.array([current_price]))[0]
     ax.plot(current_price, current_pnl, 'o', color='orange', markersize=10)
 
+    # Set y-axis limits to ensure labels are visible
+    ax.set_ylim(y_min, y_max)
+
     ax.set_xlabel('Stock Price ($)')
     ax.set_ylabel('Profit/Loss ($)')
-    ax.set_title(f'{ticker} - P&L at Expiration')
+    if latest_expiry:
+        ax.set_title(f'{ticker} - P&L at Latest Expiration ({latest_expiry})')
+    else:
+        ax.set_title(f'{ticker} - P&L at Expiration')
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
