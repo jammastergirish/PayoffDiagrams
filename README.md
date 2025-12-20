@@ -7,13 +7,13 @@ properly combining stock and options positions.
 
 ## Columns
 
-REQUIRED COLUMNS (order doesn't matter):
+### REQUIRED:
 - Financial Instrument: Stock ticker (e.g., "MU", "NVDA") or option description
   (e.g., "IREN Jan30'26 40 CALL", "NVDA Jun18'26 200 CALL")
 - Position: Quantity of shares/contracts (positive for long, negative for short)
 - Cost Basis: Total cost basis for the position
 
-OPTIONAL COLUMNS:
+### OPTIONAL (which I actually think should be required; will test on market open):
 - Last: Current price (used for stocks to get current stock price)
 - Underlying Price: Underlying stock price for options (if provided, used directly;
   otherwise estimated from option prices)
