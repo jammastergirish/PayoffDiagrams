@@ -304,12 +304,33 @@ def plot_ticker_pnl(
     prices = get_price_range(ticker_positions, current_price)
     pnl = calculate_pnl(ticker_positions, prices)
 
-    # Add colored backgrounds: light green above 0, light red below 0
-    # Calculate y-range with padding for the background spans
+    # Calculate y-axis range: ensure it spans from 10% below lowest strike to 10% above highest strike
+    # while also including all P&L values
     pnl_min, pnl_max = min(pnl), max(pnl)
-    y_padding = max(abs(pnl_min), abs(pnl_max)) * 0.15
-    y_min = pnl_min - y_padding
-    y_max = pnl_max + y_padding
+    strikes = [p.strike for p in ticker_positions if p.strike and p.position_type in [
+        'call', 'put']]
+
+    if strikes:
+        # Calculate strike-based range (10% below lowest, 10% above highest)
+        strike_min = min(strikes) * 0.9
+        strike_max = max(strikes) * 1.1
+
+        # The y-axis shows P&L (dollars), not stock prices, so we need to ensure
+        # the range includes both the P&L values AND spans at least the strike range
+        # Take the union: y_min should be the minimum of (P&L_min, strike_min)
+        # and y_max should be the maximum of (P&L_max, strike_max)
+        y_min = min(pnl_min, strike_min)
+        y_max = max(pnl_max, strike_max)
+
+        # Add small padding for better visibility
+        y_padding = (y_max - y_min) * 0.05
+        y_min -= y_padding
+        y_max += y_padding
+    else:
+        # Fallback to P&L-based range if no strikes found
+        y_padding = max(abs(pnl_min), abs(pnl_max)) * 0.15
+        y_min = pnl_min - y_padding
+        y_max = pnl_max + y_padding
 
     # Add background colors (will be clipped to plot area automatically)
     ax.axhspan(0, y_max, alpha=0.2, color='lightgreen', zorder=0)
