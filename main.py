@@ -284,9 +284,66 @@ def get_price_range(positions: List[Position], current_price: float) -> np.ndarr
     return np.linspace(low, high, 200)
 
 
+def calculate_unrealized_pnl_per_ticker(
+    csv_path: str, positions: List[Position], stock_prices: dict[str, float]
+) -> dict[str, float]:
+    """Calculate unrealized P&L per ticker from CSV, handling covered calls.
+
+    For covered calls (short calls where stock price is NOT above strike),
+    ignore the call's P&L.
+    """
+    df = pd.read_csv(csv_path)
+    unrealized_pnl = {}
+
+    # Group positions by ticker
+    ticker_positions_map = {}
+    for pos in positions:
+        if pos.ticker not in ticker_positions_map:
+            ticker_positions_map[pos.ticker] = []
+        ticker_positions_map[pos.ticker].append(pos)
+
+    for ticker, ticker_positions in ticker_positions_map.items():
+        if ticker not in stock_prices:
+            continue
+
+        current_price = stock_prices[ticker]
+        total_pnl = 0.0
+
+        # Find short calls (covered calls) - these should be ignored if stock price <= strike
+        short_calls = [p for p in ticker_positions
+                       if p.position_type == 'call' and p.qty < 0 and p.strike]
+
+        for _, row in df.iterrows():
+            instrument = row.get('Financial Instrument', '')
+            if pd.isna(instrument):
+                continue
+
+            parsed = parse_financial_instrument(str(instrument))
+            if parsed['ticker'] != ticker:
+                continue
+
+            # Check if this is a covered call to ignore
+            if parsed['type'] == 'call' and parsed.get('strike'):
+                # Check if there's a short call with this strike
+                is_covered_call = any(
+                    sc.strike == parsed['strike']
+                    for sc in short_calls
+                )
+                if is_covered_call and current_price <= parsed['strike']:
+                    continue  # Ignore this covered call
+
+            # Add unrealized P&L for this position
+            pnl = clean_number(row.get('Unrealized P&L', 0))
+            total_pnl += pnl
+
+        unrealized_pnl[ticker] = total_pnl
+
+    return unrealized_pnl
+
+
 def plot_ticker_pnl(
     positions: List[Position], ticker: str, current_price: float,
-    is_estimated: bool, ax
+    is_estimated: bool, ax, unrealized_pnl: Optional[float] = None
 ):
     """Plot P&L curve for a single ticker.
 
@@ -415,10 +472,24 @@ def plot_ticker_pnl(
             verticalalignment='top', fontfamily='monospace',
             bbox={"boxstyle": 'round', "facecolor": 'wheat', "alpha": 0.5})
 
+    # Display unrealized P&L in top right corner
+    if unrealized_pnl is not None:
+        color = 'lightgreen' if unrealized_pnl >= 0 else 'lightcoral'
+        ax.text(0.98, 0.98, f'Unrealized P&L:\n${unrealized_pnl:,.0f}',
+                transform=ax.transAxes, fontsize=10, fontweight='bold',
+                verticalalignment='top', horizontalalignment='right',
+                bbox={"boxstyle": 'round', "facecolor": color, "alpha": 0.7},
+                color='black')
+
 
 def main(csv_path: str, output_path: str = 'payoffdiagrams.png'):
     """Generate combined P&L chart for all tickers."""
     positions, stock_prices, is_estimated = load_positions(csv_path)
+
+    # Calculate unrealized P&L per ticker
+    unrealized_pnl = calculate_unrealized_pnl_per_ticker(
+        csv_path, positions, stock_prices
+    )
 
     tickers = sorted(
         set(p.ticker for p in positions if p.ticker in stock_prices))
@@ -436,7 +507,8 @@ def main(csv_path: str, output_path: str = 'payoffdiagrams.png'):
     for idx, ticker in enumerate(tickers):
         plot_ticker_pnl(
             positions, ticker, stock_prices[ticker],
-            is_estimated.get(ticker, False), axes[idx]
+            is_estimated.get(ticker, False), axes[idx],
+            unrealized_pnl.get(ticker)
         )
 
     for i in range(n, len(axes)):
