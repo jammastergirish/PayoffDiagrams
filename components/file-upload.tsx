@@ -55,7 +55,7 @@ export function FileUpload({ onFileSelect }: FileUploadProps) {
           <UploadCloud className="h-8 w-8 text-orange-500" />
         </div>
         <div className="space-y-1">
-            <h3 className="text-xl font-light text-white">Upload positions.csv</h3>
+            <h3 className="text-xl font-light text-white">Upload CSV</h3>
             <p className="text-sm text-gray-400">
             Drag and drop your IBKR export here
             </p>
