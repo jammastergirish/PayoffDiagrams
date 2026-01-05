@@ -124,25 +124,27 @@ export function calculatePnl(positions: Position[], prices: number[]): number[] 
 export function getBreakevens(prices: number[], pnl: number[]): number[] {
     if (prices.length !== pnl.length) return [];
     
-    const breakevens: number[] = [];
+    const breakevens = new Set<number>();
     
     for (let i = 0; i < pnl.length - 1; i++) {
         const v1 = pnl[i];
         const v2 = pnl[i+1];
+        const p1 = prices[i];
+        const p2 = prices[i+1];
+
+        if (v1 === 0 && v2 !== 0) breakevens.add(p1);
+        if (v2 === 0 && v1 !== 0) breakevens.add(p2);
         
         // Check for sign change
-        if ((v1 >= 0 && v2 < 0) || (v1 < 0 && v2 >= 0)) {
+        if ((v1 > 0 && v2 < 0) || (v1 < 0 && v2 > 0)) {
             if (v1 === v2) continue; // Avoid division by zero
-            
-            const p1 = prices[i];
-            const p2 = prices[i+1];
             
             // Linear interpolation: x = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
             const zeroPrice = p1 + (0 - v1) * (p2 - p1) / (v2 - v1);
-            breakevens.push(zeroPrice);
+            breakevens.add(zeroPrice);
         }
     }
-    return breakevens;
+    return Array.from(breakevens).sort((a, b) => a - b);
 }
 
 export function analyzeRiskReward(pnl: number[]) {
@@ -158,6 +160,77 @@ export function analyzeRiskReward(pnl: number[]) {
     }
     
     return { maxProfit, maxLoss };
+}
+
+export function calculateMaxRiskReward(positions: Position[]): { maxProfit: number; maxLoss: number } {
+    if (positions.length === 0) return { maxProfit: 0, maxLoss: 0 };
+
+    // 1. Identify critical points: 0 and all strikes
+    const points = new Set<number>();
+    points.add(0);
+    
+    positions.forEach(p => {
+        if (p.strike !== undefined) {
+             points.add(p.strike);
+        }
+    });
+
+    const sortedPoints = Array.from(points).sort((a, b) => a - b);
+    
+    // 2. Evaluate P&L at critical points
+    let currentMax = -Infinity;
+    let currentMin = Infinity;
+
+    // Helper to calculate P&L at a specific price
+    const getPnlAt = (price: number) => {
+        let total = 0;
+        for (const p of positions) {
+             const qty = p.qty;
+             const costBasis = p.cost_basis || 0;
+             
+             if (p.position_type === 'stock') {
+                 total += (price - costBasis) * qty;
+             } else if (p.position_type === 'call') {
+                 const strike = p.strike || 0;
+                 const intrinsic = Math.max(0, price - strike);
+                 total += (intrinsic - costBasis) * qty * 100;
+             } else if (p.position_type === 'put') {
+                 const strike = p.strike || 0;
+                 const intrinsic = Math.max(0, strike - price);
+                 total += (intrinsic - costBasis) * qty * 100;
+             }
+        }
+        return total;
+    };
+
+    for (const price of sortedPoints) {
+        const pnl = getPnlAt(price);
+        if (pnl > currentMax) currentMax = pnl;
+        if (pnl < currentMin) currentMin = pnl;
+    }
+
+    // 3. Check behavior at Infinity
+    // Net Slope = Sum(Stock Qty) + Sum(Call Qty)
+    // Puts have 0 slope at infinity
+    let slopeInfinity = 0;
+    for (const p of positions) {
+        if (p.position_type === 'stock') {
+            slopeInfinity += p.qty;
+        } else if (p.position_type === 'call') {
+            slopeInfinity += p.qty * 100; // Options are x100
+        }
+    }
+
+    // If slope > 0, Profit -> Inf
+    if (slopeInfinity > 1e-9) { // epsilon for float safety
+        currentMax = Infinity;
+    }
+    // If slope < 0, Loss -> Inf
+    if (slopeInfinity < -1e-9) {
+        currentMin = -Infinity;
+    }
+
+    return { maxProfit: currentMax, maxLoss: currentMin };
 }
 
 export function getPriceRange(positions: Position[], currentPrice: number): number[] {
@@ -193,10 +266,15 @@ export function getPriceRange(positions: Position[], currentPrice: number): numb
 }
 
 export function calculateDte(expiryDate: string): number {
-    const now = new Date();
-    const expiry = new Date(expiryDate);
-    const diffTime = expiry.getTime() - now.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const [year, month, day] = expiryDate.split('-').map(Number);
+    if (!year || !month || !day) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const expiry = new Date(year, month - 1, day);
+    const diffTime = expiry.getTime() - today.getTime();
+    return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 }
 
 export function findColumn(row: Record<string, unknown>, keyPart: string): string | undefined {

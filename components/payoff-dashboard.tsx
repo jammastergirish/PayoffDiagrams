@@ -10,6 +10,7 @@ import {
   calculatePnl, 
   getBreakevens, 
   analyzeRiskReward, 
+  calculateMaxRiskReward,
   getPriceRange,
   calculateDte,
   findColumn
@@ -154,7 +155,7 @@ export function PayoffDashboard() {
     }));
 
     const breakevens = getBreakevens(prices, pnl);
-    const stats = analyzeRiskReward(pnl);
+    const stats = calculateMaxRiskReward(activePositions);
 
     return { data, breakevens, stats };
   }, [selectedTicker, activePositions, stockPrices]);
@@ -174,6 +175,11 @@ export function PayoffDashboard() {
     });
     return { delta, gamma, theta, vega };
   }, [activePositions]);
+
+  const formatCurrency = (value: number) =>
+    `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  const formatBound = (value: number) =>
+    Number.isFinite(value) ? formatCurrency(value) : "∞";
 
   return (
     <div className="flex flex-col gap-6">
@@ -257,13 +263,13 @@ export function PayoffDashboard() {
                             <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30">
                                 <p className="text-xs text-green-400 font-medium uppercase tracking-wider">Max Profit</p>
                                 <p className="text-2xl font-light text-green-300 mt-1">
-                                    {chartData.stats.maxProfit > 1e6 ? "Unlimited" : `$${chartData.stats.maxProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                                    {formatBound(chartData.stats.maxProfit)}
                                 </p>
                             </div>
                             <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30">
                                 <p className="text-xs text-red-400 font-medium uppercase tracking-wider">Max Loss</p>
                                 <p className="text-2xl font-light text-red-300 mt-1">
-                                    {chartData.stats.maxLoss < -1e6 ? "Unlimited" : `$${chartData.stats.maxLoss.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                                    {formatBound(chartData.stats.maxLoss)}
                                 </p>
                             </div>
                             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
