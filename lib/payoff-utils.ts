@@ -90,6 +90,83 @@ export function parseFinancialInstrument(instrument: string): { ticker: string; 
     return { ticker: instrument.toUpperCase(), type: 'stock' };
 }
 
+export function parsePositionsFromRows(rows: Record<string, unknown>[]): {
+    positions: Position[];
+    prices: Record<string, number>;
+} {
+    const parsedPositions: Position[] = [];
+    const prices: Record<string, number> = {};
+
+    rows.forEach((row) => {
+        if (!row || typeof row !== 'object') return;
+
+        const getValue = (key: string) => {
+            const col = findColumn(row, key);
+            return col ? row[col] : undefined;
+        };
+
+        const instrument = getValue('Financial Instrument') as string;
+        if (!instrument) return;
+
+        const parsed = parseFinancialInstrument(instrument);
+        const qty = cleanNumber(getValue('Position'));
+        if (qty === 0) return;
+
+        const lastPrice = cleanNumber(getValue('Last'));
+        const costBasisTotal = cleanNumber(getValue('Cost Basis'));
+        const unrealizedPnl = cleanNumber(getValue('Unrealized P&L'));
+
+        if (parsed.type === 'stock') {
+            const costBasisPerShare = qty !== 0 ? Math.abs(costBasisTotal) / Math.abs(qty) : 0;
+
+            prices[parsed.ticker] = lastPrice;
+
+            parsedPositions.push({
+                ticker: parsed.ticker,
+                position_type: 'stock',
+                qty: qty,
+                cost_basis: costBasisPerShare,
+                unrealized_pnl: unrealizedPnl,
+                delta: 1.0,
+                gamma: 0,
+                theta: 0,
+                vega: 0
+            });
+        } else {
+            const underlyingPrice = cleanNumber(getValue('Underlying Price'));
+            if (underlyingPrice > 0) {
+                prices[parsed.ticker] = underlyingPrice;
+            }
+
+            const costBasisPerContract = qty !== 0 ? Math.abs(costBasisTotal) / Math.abs(qty) : 0;
+            const costBasisPerShare = costBasisPerContract / 100.0;
+
+            const delta = cleanNumber(getValue('Delta'));
+            const gamma = cleanNumber(getValue('Gamma'));
+            const theta = cleanNumber(getValue('Theta'));
+            const vega = cleanNumber(getValue('Vega'));
+
+            const iv = cleanNumber(getValue('Implied Vol.') || getValue('IV'));
+            const pop = cleanNumber(getValue('Prob. of Profit') || getValue('POP'));
+
+            parsedPositions.push({
+                ticker: parsed.ticker,
+                position_type: parsed.type,
+                qty: qty,
+                strike: parsed.strike,
+                expiry: parsed.expiry,
+                dte: parsed.expiry ? calculateDte(parsed.expiry) : undefined,
+                cost_basis: costBasisPerShare,
+                unrealized_pnl: unrealizedPnl,
+                delta, gamma, theta, vega,
+                iv, pop
+            });
+        }
+    });
+
+    return { positions: parsedPositions, prices };
+}
+
 export function calculatePnl(positions: Position[], prices: number[]): number[] {
     // Returns array of P&L values corresponding to the prices array
     const totalPnl = new Array(prices.length).fill(0);

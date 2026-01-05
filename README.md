@@ -27,6 +27,20 @@ Upload your Interactive Brokers (IBKR) CSV export and instantly analyze your por
 
 3.  Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+## Testing
+
+Unit tests are powered by Vitest and live under `tests/`.
+
+```bash
+npm test
+```
+
+For watch mode:
+
+```bash
+npm run test:watch
+```
+
 ## Data Requirement (IBKR Export)
 
 To get the most out of this tool, configure your **TWS (Trader Workstation)** or **IBKR Web** export to include the following columns.

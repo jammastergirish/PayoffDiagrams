@@ -5,15 +5,11 @@ import { useState, useMemo } from "react";
 import Papa from "papaparse";
 import { 
   Position, 
-  parseFinancialInstrument, 
-  cleanNumber, 
   calculatePnl, 
   getBreakevens, 
-  analyzeRiskReward, 
   calculateMaxRiskReward,
   getPriceRange,
-  calculateDte,
-  findColumn
+  parsePositionsFromRows
 } from "@/lib/payoff-utils";
 import { FileUpload } from "@/components/file-upload";
 import { PayoffChart } from "@/components/payoff-chart";
@@ -37,80 +33,9 @@ export function PayoffDashboard() {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const parsedPositions: Position[] = [];
-        const prices: Record<string, number> = {};
-
-        results.data.forEach((r: unknown) => {
-          const row = r as Record<string, unknown>;
-          
-          // Helper to safely get value from fuzzy column matching
-          const getValue = (key: string) => {
-              const col = findColumn(row, key);
-              return col ? row[col] : undefined;
-          };
-
-          const instrument = getValue('Financial Instrument') as string;
-          if (!instrument) return;
-
-          const parsed = parseFinancialInstrument(instrument);
-          const qty = cleanNumber(getValue('Position'));
-          if (qty === 0) return;
-
-          const lastPrice = cleanNumber(getValue('Last'));
-          const costBasisTotal = cleanNumber(getValue('Cost Basis'));
-          const unrealizedPnl = cleanNumber(getValue('Unrealized P&L'));
-          
-          if (parsed.type === 'stock') {
-             const costBasisPerShare = qty !== 0 ? Math.abs(costBasisTotal) / Math.abs(qty) : 0;
-             
-             prices[parsed.ticker] = lastPrice;
-             
-             parsedPositions.push({
-               ticker: parsed.ticker,
-               position_type: 'stock',
-               qty: qty,
-               cost_basis: costBasisPerShare,
-               unrealized_pnl: unrealizedPnl,
-               delta: 1.0, // Stock delta is 1
-               gamma: 0,
-               theta: 0,
-               vega: 0
-             });
-          } else {
-             // Option
-             const underlyingPrice = cleanNumber(getValue('Underlying Price'));
-             if (underlyingPrice > 0) {
-                 prices[parsed.ticker] = underlyingPrice;
-             }
-             
-             const costBasisPerContract = qty !== 0 ? Math.abs(costBasisTotal) / Math.abs(qty) : 0;
-             const costBasisPerShare = costBasisPerContract / 100.0;
-             
-             // Greeks
-             const delta = cleanNumber(getValue('Delta'));
-             const gamma = cleanNumber(getValue('Gamma'));
-             const theta = cleanNumber(getValue('Theta'));
-             const vega = cleanNumber(getValue('Vega'));
-             
-             // Advanced Metrics
-             const iv = cleanNumber(getValue('Implied Vol.') || getValue('IV'));
-             const pop = cleanNumber(getValue('Prob. of Profit') || getValue('POP'));
-
-             parsedPositions.push({
-                 ticker: parsed.ticker,
-                 position_type: parsed.type,
-                 qty: qty,
-                 strike: parsed.strike,
-                 expiry: parsed.expiry,
-                 dte: parsed.expiry ? calculateDte(parsed.expiry) : undefined,
-                 cost_basis: costBasisPerShare,
-                 unrealized_pnl: unrealizedPnl,
-                 delta, gamma, theta, vega,
-                 iv, pop
-             });
-          }
-        });
-
+        const { positions: parsedPositions, prices } = parsePositionsFromRows(
+          results.data as Record<string, unknown>[]
+        );
         setPositions(parsedPositions);
         setStockPrices(prices);
         
