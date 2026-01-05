@@ -10,7 +10,7 @@ export default function Home() {
             Payoff <span className="text-orange-500">Visualizer</span>
           </h1>
           <p className="text-lg text-gray-400">
-            Created by <a href="https://www.girish.xyz" className="hover:text-orange-500">Girish Gupta</a>
+            {/* X */}
           </p>
         </div>
         
