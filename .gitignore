@@ -1,2 +1,4 @@
 *.png
 *.csv
+.next/
+node_modules/

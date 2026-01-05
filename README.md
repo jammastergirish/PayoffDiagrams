@@ -15,22 +15,17 @@ Upload your Interactive Brokers (IBKR) CSV export and instantly analyze your por
 
 ## How to Run
 
-1.  Navigate to the web app directory:
-    ```bash
-    cd payoff-web
-    ```
-
-2.  Install dependencies (first time only):
+1.  Install dependencies (first time only):
     ```bash
     npm install
     ```
 
-3.  Start the development server:
+2.  Start the development server:
     ```bash
     npm run dev
     ```
 
-4.  Open [http://localhost:3000](http://localhost:3000) in your browser.
+3.  Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Data Requirement (IBKR Export)
 
