@@ -57,6 +57,13 @@ export function PayoffChart({
   const minY = Math.min(0, ...yValues) * 1.1;
   const maxY = Math.max(0, ...yValues) * 1.1;
 
+  const lines10k = [];
+  const start10k = Math.ceil(minY / 10000) * 10000;
+  const end10k = Math.floor(maxY / 10000) * 10000;
+  for (let y = start10k; y <= end10k; y += 10000) {
+    if (y !== 0) lines10k.push(y);
+  }
+
   return (
     <div className="h-[500px] w-full bg-slate-950 p-6 rounded-xl border border-white/10 shadow-2xl">
       <ResponsiveContainer width="100%" height="100%">
@@ -64,7 +71,7 @@ export function PayoffChart({
           data={data}
           margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
         >
-          <CartesianGrid strokeDasharray="3 3" opacity={0.1} stroke="#fff" />
+
           <XAxis 
             dataKey="price" 
             type="number" 
@@ -85,13 +92,23 @@ export function PayoffChart({
             labelFormatter={(label) => `Price: ${priceFormatter(Number(label))}`}
           />
           <Legend wrapperStyle={{ paddingTop: '20px' }} />
+
+          {lines10k.map((y) => (
+            <ReferenceLine
+              key={y}
+              y={y}
+              stroke="#334155"
+              strokeDasharray="3 3"
+              strokeOpacity={0.5}
+            />
+          ))}
           
           <ReferenceLine y={0} stroke="#fff" strokeWidth={2} />
           <ReferenceLine 
             x={currentPrice} 
-            stroke="#F97316" 
-            strokeDasharray="3 3" 
-            label={{ value: "Current", position: "top", fill: "#F97316", fontSize: 12 }} 
+            stroke="#fff" 
+            strokeWidth={2}
+            label={{ value: `Current: ${priceFormatter(currentPrice)}`, position: "top", fill: "#fff", fontSize: 12 }} 
           />
           
           {breakevens.map((be, idx) => (
@@ -100,7 +117,7 @@ export function PayoffChart({
                 x={be} 
                 stroke="#fff" 
                 strokeDasharray="3 3" 
-                label={{ value: `Breakeven ${be.toFixed(0)}`, position: "insideTopRight", fill: "#ccc", fontSize: 10 }}
+                label={{ value: `Breakeven: ${priceFormatter(be)}`, position: "insideTopRight", fill: "#ccc", fontSize: 10 }}
              />
           ))}
 

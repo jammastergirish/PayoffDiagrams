@@ -27,8 +27,8 @@ export function PayoffDashboard() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   
   // Toggles
-  const [showStock, setShowStock] = useState(true);
-  const [showOptions, setShowOptions] = useState(true);
+  const [showStock, setShowStock] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const [showCombined, setShowCombined] = useState(true);
 
   const handleFileSelect = (file: File) => {
