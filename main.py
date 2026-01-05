@@ -22,7 +22,7 @@ class Position:
     """Represents a trading position (stock or option)."""
     ticker: str
     position_type: str  # 'stock', 'call', 'put'
-    qty: int
+    qty: float
     strike: Optional[float] = None
     cost_basis: Optional[float] = None
     expiry: Optional[str] = None
@@ -33,19 +33,39 @@ def clean_number(value) -> float:
     """Clean number strings that may have commas, quotes, or other formatting."""
     if pd.isna(value):
         return 0.0
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float, np.number)):
         return float(value)
 
-    # Remove commas, quotes, and other formatting
-    cleaned = str(value).replace(',', '').replace(
-        "'", '').replace('"', '').strip()
-    # Handle negative numbers that might be formatted as '-value
-    if cleaned.startswith("'-"):
-        cleaned = '-' + cleaned[2:]
+    cleaned = str(value).strip()
+    if cleaned == '':
+        return 0.0
+
+    # Handle negatives like (123.45)
+    is_paren_negative = cleaned.startswith('(') and cleaned.endswith(')')
+    if is_paren_negative:
+        cleaned = cleaned[1:-1].strip()
+
+    # Remove commas, quotes, and common formatting
+    cleaned = cleaned.replace(',', '').replace("'", '').replace('"', '').strip()
+    # Strip option side prefixes like C5.16 or P0.26
+    cleaned = re.sub(r'^[CP](?=\d|\.)', '', cleaned, flags=re.IGNORECASE)
+    # Strip currency symbol
+    cleaned = re.sub(r'^\$', '', cleaned)
+
+    if is_paren_negative and not cleaned.startswith('-'):
+        cleaned = '-' + cleaned
     try:
         return float(cleaned)
     except (ValueError, TypeError):
         return 0.0
+
+
+def format_qty(qty: float) -> str:
+    """Format quantities without trailing .0, preserving fractional shares."""
+    qty_abs = abs(qty)
+    if qty_abs.is_integer():
+        return str(int(qty_abs))
+    return f"{qty_abs:.4f}".rstrip('0').rstrip('.')
 
 
 def parse_financial_instrument(instrument: str) -> dict:
@@ -62,18 +82,18 @@ def parse_financial_instrument(instrument: str) -> dict:
 
     # Check if it's just a ticker (stock) - no CALL/PUT keywords
     if ' CALL' not in instrument and ' PUT' not in instrument:
-        return {'ticker': instrument, 'type': 'stock'}
+        return {'ticker': instrument.upper(), 'type': 'stock'}
 
     # Parse option format: "IREN Jan30'26 40 CALL" or "NVDA Jun18'26 200 CALL"
     # Pattern: TICKER MonthDD'YY Strike CALL/PUT
     # Also handles formats like "AAAU Mar20'26 39 PUT" or
     # "MU Dec26'25 272.5 CALL"
-    pattern = (r'^([A-Z]+)\s+([A-Za-z]{3})(\d{1,2})\'(\d{2})\s+'
+    pattern = (r'^([A-Z0-9.-]+)\s+([A-Za-z]{3})(\d{1,2})\'(\d{2})\s+'
                r'(\d+(?:\.\d+)?)\s+(CALL|PUT)$')
-    match = re.match(pattern, instrument)
+    match = re.match(pattern, instrument, re.IGNORECASE)
     if match:
-        ticker = match.group(1)
-        month_str = match.group(2)
+        ticker = match.group(1).upper()
+        month_str = match.group(2).title()
         day = match.group(3)
         year_short = match.group(4)
         strike = float(match.group(5))
@@ -97,7 +117,7 @@ def parse_financial_instrument(instrument: str) -> dict:
         }
 
     # Fallback: treat as stock
-    return {'ticker': instrument, 'type': 'stock'}
+    return {'ticker': instrument.upper(), 'type': 'stock'}
 
 
 def estimate_stock_price_from_options(
@@ -191,7 +211,7 @@ def load_positions(
         if parsed['type'] == 'stock':
             # For stocks, cost basis is total, need per share
             if position_qty != 0:
-                cost_basis_per_share = cost_basis_total / abs(position_qty)
+                cost_basis_per_share = abs(cost_basis_total) / abs(position_qty)
             else:
                 cost_basis_per_share = 0
             stock_prices[parsed['ticker']] = last_price
@@ -200,14 +220,14 @@ def load_positions(
             positions.append(Position(
                 ticker=parsed['ticker'],
                 position_type='stock',
-                qty=int(position_qty),
+                qty=position_qty,
                 cost_basis=cost_basis_per_share
             ))
         else:
             # For options, cost basis is total, need per contract, then per share
             # Position is in contracts, cost basis is total
             if position_qty != 0:
-                cost_basis_per_contract = cost_basis_total / abs(position_qty)
+                cost_basis_per_contract = abs(cost_basis_total) / abs(position_qty)
             else:
                 cost_basis_per_contract = 0
             # Cost per share of option = cost per contract / 100
@@ -225,7 +245,7 @@ def load_positions(
             positions.append(Position(
                 ticker=parsed['ticker'],
                 position_type=parsed['type'],
-                qty=int(position_qty),
+                qty=position_qty,
                 strike=parsed['strike'],
                 cost_basis=cost_basis_per_share,
                 expiry=parsed.get('expiry')
@@ -244,13 +264,16 @@ def load_positions(
 def calculate_pnl(positions: List[Position], prices: np.ndarray) -> np.ndarray:
     """Calculate total P&L across all positions for a range of prices.
 
-    For options:
-    - Long positions (qty > 0): cost_basis is positive (premium paid)
-      P&L = (intrinsic - cost_basis) * qty * 100
-    - Short positions (qty < 0): cost_basis is negative (premium received)
-      P&L = (premium_received - intrinsic_paid) * |qty| * 100
-      = (-cost_basis - intrinsic) * |qty| * 100
-      = (cost_basis + intrinsic) * qty * 100  (since qty < 0, |qty| = -qty)
+    For options, we use the universal P&L formula:
+    P&L = (Exit_Price - Entry_Price) * Qty
+    
+    Where:
+    - Exit_Price = Intrinsic Value at expiry
+    - Entry_Price = Cost Basis (always positive magnitude)
+    
+    This works for:
+    - Long (Qty > 0): (Intrinsic - Cost) * Qty
+    - Short (Qty < 0): (Intrinsic - Cost) * Qty  [equivalent to (Cost - Intrinsic) * |Qty|]
     """
     total_pnl = np.zeros_like(prices)
     for pos in positions:
@@ -258,18 +281,13 @@ def calculate_pnl(positions: List[Position], prices: np.ndarray) -> np.ndarray:
             total_pnl += (prices - pos.cost_basis) * pos.qty
         elif pos.position_type == 'call':
             intrinsic = np.maximum(0, prices - pos.strike)
-            if pos.qty > 0:  # Long position
-                total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
-            else:  # Short position
-                # Premium received is -cost_basis, intrinsic paid is intrinsic
-                total_pnl += (pos.cost_basis + intrinsic) * pos.qty * 100
+            # Universal formula works for both long (qty>0) and short (qty<0)
+            # P&L = (Exit_Price - Entry_Price) * Qty
+            # Exit = Intrinsic, Entry = Cost Basis
+            total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
         else:  # put
             intrinsic = np.maximum(0, pos.strike - prices)
-            if pos.qty > 0:  # Long position
-                total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
-            else:  # Short position
-                # Premium received is -cost_basis, intrinsic paid is intrinsic
-                total_pnl += (pos.cost_basis + intrinsic) * pos.qty * 100
+            total_pnl += (intrinsic - pos.cost_basis) * pos.qty * 100
     return total_pnl
 
 
@@ -287,10 +305,9 @@ def get_price_range(positions: List[Position], current_price: float) -> np.ndarr
 def calculate_unrealized_pnl_per_ticker(
     csv_path: str, positions: List[Position], stock_prices: dict[str, float]
 ) -> dict[str, float]:
-    """Calculate unrealized P&L per ticker from CSV, handling covered calls.
+    """Calculate unrealized P&L per ticker from CSV.
 
-    For covered calls (short calls where stock price is NOT above strike),
-    ignore the call's P&L.
+    Sums all instruments per ticker using the CSV's Unrealized P&L values.
     """
     df = pd.read_csv(csv_path)
     unrealized_pnl = {}
@@ -306,35 +323,42 @@ def calculate_unrealized_pnl_per_ticker(
         if ticker not in stock_prices:
             continue
 
-        current_price = stock_prices[ticker]
         total_pnl = 0.0
 
-        # Find short calls (covered calls) - these should be ignored if stock price <= strike
-        short_calls = [p for p in ticker_positions
-                       if p.position_type == 'call' and p.qty < 0 and p.strike]
+        # Iterate through positions to ensure we match each one exactly
+        for pos in ticker_positions:
+            # Find matching CSV row for this position
+            for _, row in df.iterrows():
+                instrument = row.get('Financial Instrument', '')
+                if pd.isna(instrument):
+                    continue
 
-        for _, row in df.iterrows():
-            instrument = row.get('Financial Instrument', '')
-            if pd.isna(instrument):
-                continue
+                parsed = parse_financial_instrument(str(instrument))
 
-            parsed = parse_financial_instrument(str(instrument))
-            if parsed['ticker'] != ticker:
-                continue
+                # Match by ticker
+                if parsed['ticker'] != ticker:
+                    continue
 
-            # Check if this is a covered call to ignore
-            if parsed['type'] == 'call' and parsed.get('strike'):
-                # Check if there's a short call with this strike
-                is_covered_call = any(
-                    sc.strike == parsed['strike']
-                    for sc in short_calls
-                )
-                if is_covered_call and current_price <= parsed['strike']:
-                    continue  # Ignore this covered call
+                # For stocks, match by type
+                if pos.position_type == 'stock' and parsed['type'] == 'stock':
+                    pnl = clean_number(row.get('Unrealized P&L', 0))
+                    total_pnl += pnl
+                    break  # Found match, move to next position
 
-            # Add unrealized P&L for this position
-            pnl = clean_number(row.get('Unrealized P&L', 0))
-            total_pnl += pnl
+                # For options, match by type, strike, and expiry
+                if (pos.position_type != 'stock' and
+                    parsed['type'] == pos.position_type and
+                    parsed.get('strike') is not None and
+                    pos.strike is not None and
+                        abs(parsed['strike'] - pos.strike) < 0.01):
+                    # Check expiry if available
+                    if pos.expiry and parsed.get('expiry'):
+                        if pos.expiry != parsed['expiry']:
+                            continue
+                    # Match found
+                    pnl = clean_number(row.get('Unrealized P&L', 0))
+                    total_pnl += pnl
+                    break  # Found match, move to next position
 
         unrealized_pnl[ticker] = total_pnl
 
@@ -347,66 +371,25 @@ def plot_ticker_pnl(
 ):
     """Plot P&L curve for a single ticker.
 
-    Shows P&L at the latest expiration date. Earlier-expiring options
-    are assumed to be settled at their intrinsic value at that date.
+    Shows P&L at each expiration date for options on that ticker.
     """
     ticker_positions = [p for p in positions if p.ticker == ticker]
     if not ticker_positions:
         return
 
-    # Find the latest expiration date
-    expiries = [p.expiry for p in ticker_positions if p.expiry]
-    latest_expiry = max(expiries) if expiries else None
+    stock_positions = [p for p in ticker_positions if p.position_type == 'stock']
+    option_positions = [
+        p for p in ticker_positions if p.position_type in ('call', 'put')
+    ]
+    expiries = sorted({p.expiry for p in option_positions if p.expiry})
+    unknown_expiry_positions = [p for p in option_positions if not p.expiry]
 
     prices = get_price_range(ticker_positions, current_price)
-    pnl = calculate_pnl(ticker_positions, prices)
-
-    # Calculate y-axis range: ensure it spans from 10% below lowest strike to 10% above highest strike
-    # while also including all P&L values
-    pnl_min, pnl_max = min(pnl), max(pnl)
-    strikes = [p.strike for p in ticker_positions if p.strike and p.position_type in [
-        'call', 'put']]
-
-    if strikes:
-        # Calculate strike-based range (10% below lowest, 10% above highest)
-        strike_min = min(strikes) * 0.9
-        strike_max = max(strikes) * 1.1
-
-        # The y-axis shows P&L (dollars), not stock prices, so we need to ensure
-        # the range includes both the P&L values AND spans at least the strike range
-        # Take the union: y_min should be the minimum of (P&L_min, strike_min)
-        # and y_max should be the maximum of (P&L_max, strike_max)
-        y_min = min(pnl_min, strike_min)
-        y_max = max(pnl_max, strike_max)
-
-        # Add small padding for better visibility
-        y_padding = (y_max - y_min) * 0.05
-        y_min -= y_padding
-        y_max += y_padding
-    else:
-        # Fallback to P&L-based range if no strikes found
-        y_padding = max(abs(pnl_min), abs(pnl_max)) * 0.15
-        y_min = pnl_min - y_padding
-        y_max = pnl_max + y_padding
-
-    # Add background colors (will be clipped to plot area automatically)
-    ax.axhspan(0, y_max, alpha=0.2, color='lightgreen', zorder=0)
-    ax.axhspan(y_min, 0, alpha=0.2, color='lightcoral', zorder=0)
-
-    ax.plot(prices, pnl, 'b-', linewidth=2,
-            label='P&L at Expiration', zorder=2)
-    ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, zorder=1)
-    if is_estimated:
-        ax.axvline(x=current_price, color='orange', linestyle=':', linewidth=1.5,
-                   label=f'Est. Price: ${current_price:.2f}')
-    else:
-        ax.axvline(x=current_price, color='orange', linestyle='--', linewidth=1.5,
-                   label=f'Current: ${current_price:.2f}')
 
     # Format expiration date for display
     def format_expiry(expiry_str):
         if not expiry_str:
-            return None
+            return "Unknown"
         # Return as-is if already in YYYY-MM-DD format, otherwise try to parse
         if expiry_str and len(expiry_str) == 10 and expiry_str[4] == '-' and expiry_str[7] == '-':
             return expiry_str
@@ -416,6 +399,53 @@ def plot_ticker_pnl(
             return dt.strftime('%Y-%m-%d')
         except:
             return expiry_str
+
+    curves = []
+    if expiries:
+        for expiry in expiries:
+            curve_positions = stock_positions + unknown_expiry_positions + [
+                p for p in option_positions if p.expiry == expiry
+            ]
+            pnl = calculate_pnl(curve_positions, prices)
+            curves.append((f"Expiry {format_expiry(expiry)}", pnl))
+    else:
+        pnl = calculate_pnl(ticker_positions, prices)
+        label = 'P&L at Expiration'
+        if unknown_expiry_positions:
+            label = 'P&L at Expiration (unknown)'
+        curves.append((label, pnl))
+
+    pnl_min = min(np.min(pnl) for _, pnl in curves)
+    pnl_max = max(np.max(pnl) for _, pnl in curves)
+    y_min = min(pnl_min, 0.0)
+    y_max = max(pnl_max, 0.0)
+    span = y_max - y_min
+    if span == 0:
+        span = max(abs(y_min), 1.0)
+    y_padding = span * 0.05
+    y_min -= y_padding
+    y_max += y_padding
+
+    # Add background colors (will be clipped to plot area automatically)
+    ax.axhspan(0, y_max, alpha=0.2, color='lightgreen', zorder=0)
+    ax.axhspan(y_min, 0, alpha=0.2, color='lightcoral', zorder=0)
+
+    if len(curves) == 1:
+        label, pnl = curves[0]
+        ax.plot(prices, pnl, 'b-', linewidth=2, label=label, zorder=2)
+    else:
+        cmap = plt.get_cmap('tab10')
+        for idx, (label, pnl) in enumerate(curves):
+            ax.plot(prices, pnl, linewidth=2, color=cmap(idx % cmap.N),
+                    label=label, zorder=2)
+
+    ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, zorder=1)
+    if is_estimated:
+        ax.axvline(x=current_price, color='orange', linestyle=':', linewidth=1.5,
+                   label=f'Est. Price: ${current_price:.2f}')
+    else:
+        ax.axvline(x=current_price, color='orange', linestyle='--', linewidth=1.5,
+                   label=f'Current: ${current_price:.2f}')
 
     for pos in ticker_positions:
         if pos.strike:
@@ -437,6 +467,10 @@ def plot_ticker_pnl(
                             fontsize=7, color=color, alpha=0.7)
 
     current_pnl = calculate_pnl(ticker_positions, np.array([current_price]))[0]
+    # Use unrealized P&L from CSV if available (includes time value),
+    # otherwise fall back to calculated expiration P&L
+    if unrealized_pnl is not None:
+        current_pnl = unrealized_pnl
     ax.plot(current_price, current_pnl, 'o', color='orange', markersize=10)
 
     # Set y-axis limits to ensure labels are visible
@@ -444,8 +478,12 @@ def plot_ticker_pnl(
 
     ax.set_xlabel('Stock Price ($)')
     ax.set_ylabel('Profit/Loss ($)')
-    if latest_expiry:
-        ax.set_title(f'{ticker} - P&L at Latest Expiration ({latest_expiry})')
+    if len(expiries) == 1:
+        ax.set_title(
+            f'{ticker} - P&L at Expiration ({format_expiry(expiries[0])})'
+        )
+    elif len(expiries) > 1:
+        ax.set_title(f'{ticker} - P&L by Expiration')
     else:
         ax.set_title(f'{ticker} - P&L at Expiration')
     ax.legend()
@@ -455,10 +493,13 @@ def plot_ticker_pnl(
     # Position summary
     summary = []
     for pos in ticker_positions:
+        qty_str = format_qty(pos.qty)
+        sign = '+' if pos.qty > 0 else '-' if pos.qty < 0 else ''
         if pos.position_type == 'stock':
-            summary.append(f"+{pos.qty} shares @ ${pos.cost_basis:.2f}")
+            summary.append(
+                f"{sign}{qty_str} shares @ ${pos.cost_basis:.2f}"
+            )
         else:
-            sign = '+' if pos.qty > 0 else ''
             opt = 'C' if pos.position_type == 'call' else 'P'
             if pos.dte:
                 dte_str = f" ({pos.dte} DTE)"
@@ -466,7 +507,9 @@ def plot_ticker_pnl(
                 dte_str = f" ({pos.expiry})"
             else:
                 dte_str = ""
-            summary.append(f"{sign}{pos.qty} ${pos.strike:.1f}{opt}{dte_str}")
+            summary.append(
+                f"{sign}{qty_str} ${pos.strike:.1f}{opt}{dte_str}"
+            )
 
     ax.text(0.02, 0.98, '\n'.join(summary), transform=ax.transAxes, fontsize=9,
             verticalalignment='top', fontfamily='monospace',
@@ -480,6 +523,98 @@ def plot_ticker_pnl(
                 verticalalignment='top', horizontalalignment='right',
                 bbox={"boxstyle": 'round', "facecolor": color, "alpha": 0.7},
                 color='black')
+
+
+def plot_consolidated_pnl(
+    positions: List[Position], stock_prices: dict[str, float],
+    is_estimated: dict[str, bool], output_path: str = 'consolidated.png'
+):
+    """Plot consolidated P&L chart with all tickers normalized to percentage change.
+
+    Each ticker's P&L curve is normalized to its own percentage change from current price,
+    allowing comparison of sensitivities across different tickers.
+    """
+    tickers = sorted(
+        set(p.ticker for p in positions if p.ticker in stock_prices))
+
+    if len(tickers) == 0:
+        print("No valid positions found with stock prices.")
+        return
+
+    _, ax = plt.subplots(figsize=(12, 8))
+
+    # Define percentage range (e.g., -50% to +50%)
+    pct_range = np.linspace(-50, 50, 200)
+
+    # Use a colormap to assign different colors to each ticker
+    cmap = plt.get_cmap('tab20')
+    colors = cmap(np.linspace(0, 1, len(tickers)))
+
+    # Track overall P&L range for y-axis
+    all_pnl_min = float('inf')
+    all_pnl_max = float('-inf')
+
+    for idx, ticker in enumerate(tickers):
+        ticker_positions = [p for p in positions if p.ticker == ticker]
+        if not ticker_positions:
+            continue
+
+        current_price = stock_prices[ticker]
+
+        # Convert percentage change to actual prices for this ticker
+        prices = current_price * (1 + pct_range / 100.0)
+
+        # Calculate P&L for this ticker
+        pnl = calculate_pnl(ticker_positions, prices)
+
+        # Update overall P&L range
+        pnl_min = np.min(pnl)
+        pnl_max = np.max(pnl)
+        all_pnl_min = min(all_pnl_min, pnl_min)
+        all_pnl_max = max(all_pnl_max, pnl_max)
+
+        # Plot this ticker's curve
+        label = ticker
+        if is_estimated.get(ticker, False):
+            label += " (est.)"
+
+        ax.plot(pct_range, pnl, linewidth=2,
+                color=colors[idx], label=label, zorder=2)
+
+        # Mark current point (0% change)
+        current_pnl = calculate_pnl(
+            ticker_positions, np.array([current_price]))[0]
+        ax.plot(0, current_pnl, 'o', color=colors[idx], markersize=8, zorder=3)
+
+    # Add background colors
+    ax.axhspan(0, all_pnl_max, alpha=0.2, color='lightgreen', zorder=0)
+    ax.axhspan(all_pnl_min, 0, alpha=0.2, color='lightcoral', zorder=0)
+
+    # Add zero lines
+    ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, zorder=1)
+    ax.axvline(x=0, color='gray', linestyle='--', linewidth=0.5, zorder=1)
+
+    # Set axis labels and title
+    ax.set_xlabel('Percentage Change from Current Price (%)', fontsize=12)
+    ax.set_ylabel('Profit/Loss ($)', fontsize=12)
+    title = 'Consolidated P&L - All Tickers (Normalized to % Change)'
+    ax.set_title(title, fontsize=14, fontweight='bold')
+
+    # Format axes
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.0f}%'))
+
+    # Set y-axis limits with padding
+    y_padding = (all_pnl_max - all_pnl_min) * 0.05
+    ax.set_ylim(all_pnl_min - y_padding, all_pnl_max + y_padding)
+
+    # Add legend
+    ax.legend(loc='best', fontsize=9, framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    print(f"Saved {output_path}")
 
 
 def main(csv_path: str, output_path: str = 'payoffdiagrams.png'):
@@ -517,6 +652,10 @@ def main(csv_path: str, output_path: str = 'payoffdiagrams.png'):
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     print(f"Saved {output_path}")
+
+    # Also generate consolidated view
+    plot_consolidated_pnl(positions, stock_prices,
+                          is_estimated, 'consolidated.png')
 
 
 if __name__ == '__main__':
