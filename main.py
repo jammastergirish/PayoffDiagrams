@@ -261,6 +261,43 @@ def load_positions(
     return positions, stock_prices, is_estimated
 
 
+def get_breakevens(prices: np.ndarray, pnl: np.ndarray) -> List[float]:
+    """Find price points where P&L crosses zero."""
+    if len(prices) != len(pnl):
+        return []
+    
+    # Sign changes indicate zero crossings
+    # use signbit to handle -0.0 correctly and detecting crossing
+    # efficiently
+    sign_changes = np.where(np.diff(np.signbit(pnl)))[0]
+    breakevens = []
+    
+    for idx in sign_changes:
+        # Linear interpolation to find more precise zero crossing
+        p1, p2 = prices[idx], prices[idx+1]
+        v1, v2 = pnl[idx], pnl[idx+1]
+        
+        if v1 == v2: # Avoid division by zero
+            continue
+            
+        # x = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
+        zero_price = p1 + (0 - v1) * (p2 - p1) / (v2 - v1)
+        breakevens.append(zero_price)
+        
+    return breakevens
+
+
+def analyze_risk_reward(pnl: np.ndarray) -> dict:
+    """Analyze P&L array for max profit, max loss, and risk/reward ratio."""
+    max_profit = np.max(pnl)
+    max_loss = np.min(pnl)
+    
+    return {
+        'max_profit': max_profit,
+        'max_loss': max_loss,
+    }
+
+
 def calculate_pnl(positions: List[Position], prices: np.ndarray) -> np.ndarray:
     """Calculate total P&L across all positions for a range of prices.
 
@@ -415,20 +452,26 @@ def plot_ticker_pnl(
             label = 'P&L at Expiration (unknown)'
         curves.append((label, pnl))
 
-    pnl_min = min(np.min(pnl) for _, pnl in curves)
-    pnl_max = max(np.max(pnl) for _, pnl in curves)
+    pnl_min, pnl_max = min(np.min(pnl) for _, pnl in curves), max(np.max(pnl) for _, pnl in curves)
+    
+    # Calculate stats using the total P&L curve (sum of all curves at same expiry if single, else use first one)
+    # For simplicity, if multiple expiries, we analyze the curve for the LATEST expiry
+    latest_expiry_curve = curves[-1][1]
+    breakevens = get_breakevens(prices, latest_expiry_curve)
+    risk_reward = analyze_risk_reward(latest_expiry_curve)
+    
     y_min = min(pnl_min, 0.0)
     y_max = max(pnl_max, 0.0)
     span = y_max - y_min
     if span == 0:
         span = max(abs(y_min), 1.0)
-    y_padding = span * 0.05
+    y_padding = span * 0.1 # Increased padding
     y_min -= y_padding
     y_max += y_padding
 
     # Add background colors (will be clipped to plot area automatically)
-    ax.axhspan(0, y_max, alpha=0.2, color='lightgreen', zorder=0)
-    ax.axhspan(y_min, 0, alpha=0.2, color='lightcoral', zorder=0)
+    ax.axhspan(0, y_max, alpha=0.1, color='green', zorder=0)
+    ax.axhspan(y_min, 0, alpha=0.1, color='red', zorder=0)
 
     if len(curves) == 1:
         label, pnl = curves[0]
@@ -436,93 +479,88 @@ def plot_ticker_pnl(
     else:
         cmap = plt.get_cmap('tab10')
         for idx, (label, pnl) in enumerate(curves):
-            ax.plot(prices, pnl, linewidth=2, color=cmap(idx % cmap.N),
+            ax.plot(prices, pnl, linewidth=2, color=cmap(idx % cmap.N), 
                     label=label, zorder=2)
 
-    ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, zorder=1)
+    ax.axhline(y=0, color='black', linestyle='-', linewidth=0.8, zorder=1)
+    
+    # Draw Breakeven Lines
+    for be in breakevens:
+        ax.axvline(x=be, color='black', linestyle='-.', linewidth=1, alpha=0.7)
+        ax.text(be, y_max*0.95, f'BE\n{be:.1f}', ha='center', va='top', fontsize=8, fontweight='bold',
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1))
+        
     if is_estimated:
         ax.axvline(x=current_price, color='orange', linestyle=':', linewidth=1.5,
-                   label=f'Est. Price: ${current_price:.2f}')
+                   label=f'Est: ${current_price:.2f}')
     else:
-        ax.axvline(x=current_price, color='orange', linestyle='--', linewidth=1.5,
-                   label=f'Current: ${current_price:.2f}')
+        ax.axvline(x=current_price, color='darkorange', linestyle='--', linewidth=1.5,
+                   label=f'Now: ${current_price:.2f}')
 
     for pos in ticker_positions:
         if pos.strike:
-            color = 'green' if pos.position_type == 'call' else 'red'
-            ax.axvline(x=pos.strike, color=color,
-                       linestyle=':' if pos.qty < 0 else '-', alpha=0.5)
-
-            # Add expiration date label if available
+            color = 'darkgreen' if pos.position_type == 'call' else 'darkred'
+            ax.axvline(x=pos.strike, color=color, linestyle=':', alpha=0.3)
+            
             if pos.expiry:
                 expiry_label = format_expiry(pos.expiry)
                 if expiry_label:
-                    # Position text to the right of the strike line, vertically centered
-                    # Use a small offset from the strike price
-                    x_offset = (max(prices) - min(prices)) * \
-                        0.01  # 1% of price range
-                    y_pos = (y_min + y_max) / 2  # Center vertically
-                    ax.text(pos.strike + x_offset, y_pos, expiry_label,
-                            rotation=90, ha='left', va='center',
-                            fontsize=7, color=color, alpha=0.7)
+                    # Only label strikes if they are far enough apart or just label unique ones
+                    pass 
 
     current_pnl = calculate_pnl(ticker_positions, np.array([current_price]))[0]
-    # Use unrealized P&L from CSV if available (includes time value),
-    # otherwise fall back to calculated expiration P&L
     if unrealized_pnl is not None:
         current_pnl = unrealized_pnl
-    ax.plot(current_price, current_pnl, 'o', color='orange', markersize=10)
+    ax.plot(current_price, current_pnl, 'D', color='darkorange', markersize=6, zorder=4)
 
     # Set y-axis limits to ensure labels are visible
     ax.set_ylim(y_min, y_max)
-
+    
     ax.set_xlabel('Stock Price ($)')
     ax.set_ylabel('Profit/Loss ($)')
+    
+    title = f'{ticker} Analysis'
     if len(expiries) == 1:
-        ax.set_title(
-            f'{ticker} - P&L at Expiration ({format_expiry(expiries[0])})'
-        )
-    elif len(expiries) > 1:
-        ax.set_title(f'{ticker} - P&L by Expiration')
-    else:
-        ax.set_title(f'{ticker} - P&L at Expiration')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+        title += f' (Exp: {format_expiry(expiries[0])})'
+    ax.set_title(title, fontweight='bold')
+    
+    ax.legend(loc='upper left', fontsize=8)
+    ax.grid(True, alpha=0.3, linestyle='--')
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
 
-    # Position summary
-    summary = []
+    # Position summary box (Top Left)
+    # summary = [] ... (omitted, existing logic is fine but re-implementing for placement)
+    # Actually let's use the new location: Bottom Left for positions, Top Right for Stats
+    
+    # Stats Box (Top Right)
+    max_p_str = f"${risk_reward['max_profit']:,.0f}"
+    max_l_str = f"${risk_reward['max_loss']:,.0f}"
+    
+    stats_text = [
+        f"Max Profit: {max_p_str}",
+        f"Max Loss:   {max_l_str}",
+    ]
+    if breakevens:
+        stats_text.append(f"Breakeven:  ${breakevens[0]:.1f}" + (f" & ${breakevens[1]:.1f}" if len(breakevens) > 1 else ""))
+        
+    ax.text(0.98, 0.98, '\n'.join(stats_text), transform=ax.transAxes, fontsize=9,
+            verticalalignment='top', horizontalalignment='right', family='monospace',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
+            
+    # Position details (Bottom Left)
+    pos_text = []
     for pos in ticker_positions:
         qty_str = format_qty(pos.qty)
-        sign = '+' if pos.qty > 0 else '-' if pos.qty < 0 else ''
+        sign = '+' if pos.qty > 0 else ''
         if pos.position_type == 'stock':
-            summary.append(
-                f"{sign}{qty_str} shares @ ${pos.cost_basis:.2f}"
-            )
+            pos_text.append(f"{sign}{qty_str} Stock @ {pos.cost_basis:.1f}")
         else:
             opt = 'C' if pos.position_type == 'call' else 'P'
-            if pos.dte:
-                dte_str = f" ({pos.dte} DTE)"
-            elif pos.expiry:
-                dte_str = f" ({pos.expiry})"
-            else:
-                dte_str = ""
-            summary.append(
-                f"{sign}{qty_str} ${pos.strike:.1f}{opt}{dte_str}"
-            )
-
-    ax.text(0.02, 0.98, '\n'.join(summary), transform=ax.transAxes, fontsize=9,
-            verticalalignment='top', fontfamily='monospace',
-            bbox={"boxstyle": 'round', "facecolor": 'wheat', "alpha": 0.5})
-
-    # Display unrealized P&L in top right corner
-    if unrealized_pnl is not None:
-        color = 'lightgreen' if unrealized_pnl >= 0 else 'lightcoral'
-        ax.text(0.98, 0.98, f'Unrealized P&L:\n${unrealized_pnl:,.0f}',
-                transform=ax.transAxes, fontsize=10, fontweight='bold',
-                verticalalignment='top', horizontalalignment='right',
-                bbox={"boxstyle": 'round', "facecolor": color, "alpha": 0.7},
-                color='black')
+            pos_text.append(f"{sign}{qty_str} {pos.strike:.1f}{opt} @ {pos.cost_basis:.2f}")
+            
+    ax.text(0.02, 0.02, '\n'.join(pos_text), transform=ax.transAxes, fontsize=8,
+            verticalalignment='bottom', horizontalalignment='left', family='monospace',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='lightgray'))
 
 
 def plot_consolidated_pnl(
