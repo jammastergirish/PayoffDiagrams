@@ -219,10 +219,15 @@ export function PayoffDashboard() {
                                     {formatBound(chartData.stats.maxProfit)}
                                 </p>
                             </div>
-                            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30">
-                                <p className="text-xs text-red-400 font-medium uppercase tracking-wider">Max Loss</p>
-                                <p className="text-2xl font-light text-red-300 mt-1">
-                                    {formatBound(chartData.stats.maxLoss)}
+                            <div className={`p-4 rounded-lg border ${chartData.stats.maxLoss > 0 ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30"}`}>
+                                <p className={`text-xs font-medium uppercase tracking-wider ${chartData.stats.maxLoss > 0 ? "text-green-400" : "text-red-400"}`}>
+                                    {chartData.stats.maxLoss > 0 ? "Guaranteed Profit" : "Max Loss"}
+                                </p>
+                                <p className={`text-2xl font-light mt-1 ${chartData.stats.maxLoss > 0 ? "text-green-300" : "text-red-300"}`}>
+                                    {chartData.stats.maxLoss > 0 
+                                        ? formatBound(chartData.stats.maxLoss)
+                                        : formatBound(-1 * chartData.stats.maxLoss)
+                                    }
                                 </p>
                             </div>
                             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
@@ -286,7 +291,7 @@ export function PayoffDashboard() {
                                       {pos.expiry && <span className="ml-2 text-xs text-gray-500 border border-white/10 px-2 py-0.5 rounded-full">
                                           {pos.expiry} <span className="text-gray-400">({pos.dte}d)</span>
                                       </span>}
-                                      {pos.iv && pos.iv > 0 && <span className="ml-2 text-xs text-orange-400 border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 rounded-full">IV {pos.iv.toFixed(1)}%</span>}
+                                      {pos.iv !== undefined && pos.iv > 0 && <span className="ml-2 text-xs text-orange-400 border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 rounded-full">IV {pos.iv.toFixed(1)}%</span>}
                                   </div>
                                   <div className="text-right">
                                       <div className="text-sm font-mono text-gray-400">
