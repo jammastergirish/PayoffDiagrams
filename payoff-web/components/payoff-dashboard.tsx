@@ -69,7 +69,11 @@ export function PayoffDashboard() {
                position_type: 'stock',
                qty: qty,
                cost_basis: costBasisPerShare,
-               unrealized_pnl: unrealizedPnl
+               unrealized_pnl: unrealizedPnl,
+               delta: 1.0, // Stock delta is 1
+               gamma: 0,
+               theta: 0,
+               vega: 0
              });
           } else {
              // Option
@@ -81,6 +85,16 @@ export function PayoffDashboard() {
              const costBasisPerContract = qty !== 0 ? Math.abs(costBasisTotal) / Math.abs(qty) : 0;
              const costBasisPerShare = costBasisPerContract / 100.0;
              
+             // Greeks
+             const delta = cleanNumber(getValue('Delta'));
+             const gamma = cleanNumber(getValue('Gamma'));
+             const theta = cleanNumber(getValue('Theta'));
+             const vega = cleanNumber(getValue('Vega'));
+             
+             // Advanced Metrics
+             const iv = cleanNumber(getValue('Implied Vol.') || getValue('IV'));
+             const pop = cleanNumber(getValue('Prob. of Profit') || getValue('POP'));
+
              parsedPositions.push({
                  ticker: parsed.ticker,
                  position_type: parsed.type,
@@ -89,7 +103,9 @@ export function PayoffDashboard() {
                  expiry: parsed.expiry,
                  dte: parsed.expiry ? calculateDte(parsed.expiry) : undefined,
                  cost_basis: costBasisPerShare,
-                 unrealized_pnl: unrealizedPnl
+                 unrealized_pnl: unrealizedPnl,
+                 delta, gamma, theta, vega,
+                 iv, pop
              });
           }
         });
@@ -145,6 +161,19 @@ export function PayoffDashboard() {
 
   const currentPrice = selectedTicker ? (stockPrices[selectedTicker] || 0) : 0;
   const totalUnrealizedPnl = activePositions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+
+  // Calculate Net Greeks
+  const netRisk = useMemo(() => {
+    let delta = 0, gamma = 0, theta = 0, vega = 0;
+    activePositions.forEach(p => {
+        const multiplier = p.position_type === 'stock' ? 1 : 100;
+        delta += (p.delta || 0) * p.qty * multiplier;
+        gamma += (p.gamma || 0) * p.qty * multiplier;
+        theta += (p.theta || 0) * p.qty * multiplier;
+        vega += (p.vega || 0) * p.qty * multiplier;
+    });
+    return { delta, gamma, theta, vega };
+  }, [activePositions]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -253,6 +282,33 @@ export function PayoffDashboard() {
                             </div>
                         </div>
                     )}
+
+                    {/* Risk Dashboard */}
+                    <div className="mt-6 pt-6 border-t border-white/5">
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Risk Profile (Greeks)</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                            <p className="text-xs text-orange-400 font-medium uppercase tracking-wider">Net Delta</p>
+                            <p className="text-xl font-mono text-orange-200 mt-1">{netRisk.delta.toFixed(0)}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">Eq. Shares exposure</p>
+                            </div>
+                            <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                            <p className="text-xs text-purple-400 font-medium uppercase tracking-wider">Net Gamma</p>
+                            <p className="text-xl font-mono text-purple-200 mt-1">{netRisk.gamma.toFixed(2)}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">Delta acceleration</p>
+                            </div>
+                            <div className="p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+                            <p className="text-xs text-emerald-400 font-medium uppercase tracking-wider">Net Theta</p>
+                            <p className="text-xl font-mono text-emerald-200 mt-1">${netRisk.theta.toFixed(0)}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">Daily time decay</p>
+                            </div>
+                            <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+                            <p className="text-xs text-cyan-400 font-medium uppercase tracking-wider">Net Vega</p>
+                            <p className="text-xl font-mono text-cyan-200 mt-1">${netRisk.vega.toFixed(0)}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">Vol sensitivity</p>
+                            </div>
+                        </div>
+                    </div>
                  </CardContent>
                </Card>
                
@@ -271,10 +327,11 @@ export function PayoffDashboard() {
                                       {pos.expiry && <span className="ml-2 text-xs text-gray-500 border border-white/10 px-2 py-0.5 rounded-full">
                                           {pos.expiry} <span className="text-gray-400">({pos.dte}d)</span>
                                       </span>}
+                                      {pos.iv && pos.iv > 0 && <span className="ml-2 text-xs text-orange-400 border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 rounded-full">IV {pos.iv.toFixed(1)}%</span>}
                                   </div>
                                   <div className="text-right">
                                       <div className="text-sm font-mono text-gray-400">
-                                          Cost: ${pos.cost_basis?.toFixed(2)}
+                                          ${pos.cost_basis?.toFixed(2)}
                                       </div>
                                       {pos.unrealized_pnl !== undefined && (
                                           <div className={`text-xs font-mono font-bold ${pos.unrealized_pnl >= 0 ? 'text-blue-400' : 'text-red-400'}`}>

@@ -8,6 +8,12 @@ export interface Position {
   expiry?: string;
   dte?: number;
   unrealized_pnl?: number;
+  delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
+  iv?: number;
+  pop?: number;
 }
 
 export function cleanNumber(value: unknown): number {

@@ -86,7 +86,7 @@ export function PayoffChart({
           />
           <Legend wrapperStyle={{ paddingTop: '20px' }} />
           
-          <ReferenceLine y={0} stroke="#444" strokeWidth={1} />
+          <ReferenceLine y={0} stroke="#fff" strokeWidth={2} />
           <ReferenceLine 
             x={currentPrice} 
             stroke="#F97316" 

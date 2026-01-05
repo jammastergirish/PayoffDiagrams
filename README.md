@@ -1,35 +1,64 @@
-# Payoff Diagram Generator
 
-<img width="358" height="301" alt="Screenshot 2025-12-19 at 21 10 06" src="https://github.com/user-attachments/assets/85a56bb0-5f7d-418f-958b-a7c6a706b6f3" />
+# Payoff Visualizer
 
-Parses Interactive Brokers TWS CSV export and generates payoff diagrams for each ticker,
-properly combining stock and options positions.
+A privacy-focused, client-side web application for visualizing stock and option payoff diagrams.
 
-## Columns
+Upload your Interactive Brokers (IBKR) CSV export and instantly analyze your portfolio's risk profile, breakeven points, and Greeks.
 
-### REQUIRED:
-- Financial Instrument: Stock ticker (e.g., "MU", "NVDA") or option description
-  (e.g., "IREN Jan30'26 40 CALL", "NVDA Jun18'26 200 CALL")
-- Position: Quantity of shares/contracts (positive for long, negative for short)
-- Cost Basis: Total cost basis for the position
+## Features
 
-### OPTIONAL (which I actually think should be required; will test on market open):
-- Last: Current price (used for stocks to get current stock price)
-- Underlying Price: Underlying stock price for options (if provided, used directly;
-  otherwise estimated from option prices)
+*   **Interactive Charts**: visualizing P&L at different price points.
+*   **Privacy First**: All data processing happens in your browser. Your CSV is never uploaded to any server.
+*   **Risk Dashboard**: View Net Delta, Gamma, Theta, and Vega to understand your portfolio's true exposure.
+*   **Advanced Metrics**: Supports Implied Volatility (IV) and Probability of Profit (POP) analysis.
+*   **Instant Insights**: Automatically calculates Breakevens, Max Profit/Loss, and Days to Expiry (DTE).
 
-## TWS Setup
+## How to Run
 
-You'll need to split up strategies in TWS: File->Global Configuration->Display->Ticker Row->Complex (Multi-Leg Positions)->Hide Complex Positions
+1.  Navigate to the web app directory:
+    ```bash
+    cd payoff-web
+    ```
 
-## Usage
+2.  Install dependencies (first time only):
+    ```bash
+    npm install
+    ```
 
-`uv run main.py [CSV file] [image file]`
+3.  Start the development server:
+    ```bash
+    npm run dev
+    ```
 
-## Potential Next Steps
+4.  Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-- Hook up to IBKR API for IBKR Pro users.
-- Hook up to Alpaca/other data source for IBKR Lite users.
-- Bring in data/connect to other brokers.
-- Better user interface with Streamlit, or proper frontend.
+## Data Requirement (IBKR Export)
 
+To get the most out of this tool, configure your **TWS (Trader Workstation)** or **IBKR Web** export to include the following columns.
+
+You'll need to split up strategies in TWS: `File->Global Configuration->Display->Ticker Row->Complex (Multi-Leg Positions)->Hide Complex Positions`
+
+### Essential Columns
+*   `Financial Instrument` (e.g., "MU Feb20'26 300 PUT")
+*   `Position` (Quantity)
+*   `Last` (Current Price of the instrument)
+*   `Cost Basis` (Total cost of the position)
+*   `Underlying Price` (Current price of the stock)
+
+### For Greeks & Risk Dashboard (Highly Recommended)
+*   `Delta`
+*   `Gamma`
+*   `Theta`
+*   `Vega`
+
+### For Advanced Metrics (Optional)
+*   `Implied Vol.` (or `IV`)
+*   `Prob. of Profit` (or `POP`)
+*   `Unrealized P&L`
+
+### How to Export from TWS
+1.  Go to your **Portfolio** tab.
+2.  Right-click headers -> "Customize Layout".
+3.  Add the columns listed above.
+4.  Right-click any position -> "Export" -> "Export Current View".
+5.  Save as `.csv`.
