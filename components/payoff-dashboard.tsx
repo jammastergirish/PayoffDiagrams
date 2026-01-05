@@ -106,6 +106,11 @@ export function PayoffDashboard() {
   const formatBound = (value: number) =>
     Number.isFinite(value) ? formatCurrency(value) : "∞";
 
+
+  const portfolioUnrealizedPnl = useMemo(() => {
+    return positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+  }, [positions]);
+
   return (
     <div className="flex flex-col gap-6">
        {!positions.length && (
@@ -141,7 +146,21 @@ export function PayoffDashboard() {
        )}
 
        {positions.length > 0 && (
-         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+         <div className="flex flex-col gap-6">
+            {/* Total Portfolio P&L */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div className={`p-4 rounded-lg border ${portfolioUnrealizedPnl >= 0 ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30"}`}>
+                    <p className={`text-xs font-medium uppercase tracking-wider ${portfolioUnrealizedPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        Total Unrealized P&L
+                    </p>
+                    <p className={`text-2xl font-light mt-1 ${portfolioUnrealizedPnl >= 0 ? "text-green-300" : "text-red-300"}`}>
+                            {portfolioUnrealizedPnl >= 0 ? "+" : ""}{formatCurrency(portfolioUnrealizedPnl)}
+                    </p>
+                </div>
+                {/* Placeholders for future top items can go here */}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {/* Sidebar */}
             <Card className="md:col-span-1 h-fit bg-slate-950 border-white/10 text-white">
                <CardHeader>
@@ -310,7 +329,9 @@ export function PayoffDashboard() {
                </Card>
             </div>
          </div>
+          </div>
        )}
+
     </div>
   );
 }
