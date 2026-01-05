@@ -1,5 +1,4 @@
 
-
 export interface Position {
   ticker: string;
   position_type: 'stock' | 'call' | 'put';
@@ -8,6 +7,7 @@ export interface Position {
   cost_basis?: number;
   expiry?: string;
   dte?: number;
+  unrealized_pnl?: number;
 }
 
 export function cleanNumber(value: unknown): number {
@@ -184,4 +184,22 @@ export function getPriceRange(positions: Position[], currentPrice: number): numb
         range.push(low + i * step);
     }
     return range;
+}
+
+export function calculateDte(expiryDate: string): number {
+    const now = new Date();
+    const expiry = new Date(expiryDate);
+    const diffTime = expiry.getTime() - now.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+export function findColumn(row: Record<string, unknown>, keyPart: string): string | undefined {
+    const keys = Object.keys(row);
+    // 1. Exact match
+    if (keys.includes(keyPart)) return keyPart;
+    
+    // 2. Case insensitive match or Trimmed match
+    const lowerKey = keyPart.toLowerCase();
+    const match = keys.find(k => k.trim().toLowerCase() === lowerKey || k.toLowerCase().includes(lowerKey));
+    return match;
 }

@@ -100,7 +100,7 @@ export function PayoffChart({
                 x={be} 
                 stroke="#fff" 
                 strokeDasharray="3 3" 
-                label={{ value: `BE ${be.toFixed(0)}`, position: "insideTopRight", fill: "#ccc", fontSize: 10 }}
+                label={{ value: `Breakeven ${be.toFixed(0)}`, position: "insideTopRight", fill: "#ccc", fontSize: 10 }}
              />
           ))}
 

@@ -10,7 +10,9 @@ import {
   calculatePnl, 
   getBreakevens, 
   analyzeRiskReward, 
-  getPriceRange 
+  getPriceRange,
+  calculateDte,
+  findColumn
 } from "@/lib/payoff-utils";
 import { FileUpload } from "@/components/file-upload";
 import { PayoffChart } from "@/components/payoff-chart";
@@ -39,18 +41,27 @@ export function PayoffDashboard() {
 
         results.data.forEach((r: unknown) => {
           const row = r as Record<string, unknown>;
-          const instrument = row['Financial Instrument'] as string;
+          
+          // Helper to safely get value from fuzzy column matching
+          const getValue = (key: string) => {
+              const col = findColumn(row, key);
+              return col ? row[col] : undefined;
+          };
+
+          const instrument = getValue('Financial Instrument') as string;
           if (!instrument) return;
 
           const parsed = parseFinancialInstrument(instrument);
-          const qty = cleanNumber(row['Position']);
+          const qty = cleanNumber(getValue('Position'));
           if (qty === 0) return;
 
-          const lastPrice = cleanNumber(row['Last']);
-          const costBasisTotal = cleanNumber(row['Cost Basis']);
+          const lastPrice = cleanNumber(getValue('Last'));
+          const costBasisTotal = cleanNumber(getValue('Cost Basis'));
+          const unrealizedPnl = cleanNumber(getValue('Unrealized P&L'));
           
           if (parsed.type === 'stock') {
              const costBasisPerShare = qty !== 0 ? Math.abs(costBasisTotal) / Math.abs(qty) : 0;
+             
              prices[parsed.ticker] = lastPrice;
              
              parsedPositions.push({
@@ -58,10 +69,11 @@ export function PayoffDashboard() {
                position_type: 'stock',
                qty: qty,
                cost_basis: costBasisPerShare,
+               unrealized_pnl: unrealizedPnl
              });
           } else {
              // Option
-             const underlyingPrice = cleanNumber(row['Underlying Price']);
+             const underlyingPrice = cleanNumber(getValue('Underlying Price'));
              if (underlyingPrice > 0) {
                  prices[parsed.ticker] = underlyingPrice;
              }
@@ -75,7 +87,9 @@ export function PayoffDashboard() {
                  qty: qty,
                  strike: parsed.strike,
                  expiry: parsed.expiry,
-                 cost_basis: costBasisPerShare
+                 dte: parsed.expiry ? calculateDte(parsed.expiry) : undefined,
+                 cost_basis: costBasisPerShare,
+                 unrealized_pnl: unrealizedPnl
              });
           }
         });
@@ -130,6 +144,7 @@ export function PayoffDashboard() {
   }, [selectedTicker, activePositions, stockPrices]);
 
   const currentPrice = selectedTicker ? (stockPrices[selectedTicker] || 0) : 0;
+  const totalUnrealizedPnl = activePositions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -209,7 +224,7 @@ export function PayoffDashboard() {
                     />
                     
                     {chartData.stats && (
-                        <div className="grid grid-cols-3 gap-4 mt-8">
+                        <div className="grid grid-cols-4 gap-4 mt-8">
                             <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30">
                                 <p className="text-xs text-green-400 font-medium uppercase tracking-wider">Max Profit</p>
                                 <p className="text-2xl font-light text-green-300 mt-1">
@@ -226,8 +241,14 @@ export function PayoffDashboard() {
                                 <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Breakevens</p>
                                 <p className="text-2xl font-light text-white mt-1">
                                     {chartData.breakevens.length > 0 
-                                      ? chartData.breakevens.map(b => `$${b.toFixed(1)}`).join(", ") 
+                                      ? chartData.breakevens.map(b => `$${b.toFixed(0)}`).join(", ") 
                                       : "None"}
+                                </p>
+                            </div>
+                            <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                                <p className="text-xs text-blue-400 font-medium uppercase tracking-wider">Unrealized P&L</p>
+                                <p className={`text-2xl font-light mt-1 ${totalUnrealizedPnl >= 0 ? "text-blue-300" : "text-red-300"}`}>
+                                    {totalUnrealizedPnl >= 0 ? "+" : ""}${totalUnrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                 </p>
                             </div>
                         </div>
@@ -247,10 +268,19 @@ export function PayoffDashboard() {
                                           {pos.qty > 0 ? '+' : ''}{pos.qty} {pos.position_type.toUpperCase()}
                                       </span>
                                       {pos.strike && <span className="ml-2 text-gray-300">@ {pos.strike}</span>}
-                                      {pos.expiry && <span className="ml-2 text-xs text-gray-500 border border-white/10 px-2 py-0.5 rounded-full">{pos.expiry}</span>}
+                                      {pos.expiry && <span className="ml-2 text-xs text-gray-500 border border-white/10 px-2 py-0.5 rounded-full">
+                                          {pos.expiry} <span className="text-gray-400">({pos.dte}d)</span>
+                                      </span>}
                                   </div>
-                                  <div className="text-sm font-mono text-gray-400">
-                                      ${pos.cost_basis?.toFixed(2)}
+                                  <div className="text-right">
+                                      <div className="text-sm font-mono text-gray-400">
+                                          Cost: ${pos.cost_basis?.toFixed(2)}
+                                      </div>
+                                      {pos.unrealized_pnl !== undefined && (
+                                          <div className={`text-xs font-mono font-bold ${pos.unrealized_pnl >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                                              {pos.unrealized_pnl >= 0 ? "+" : ""}{pos.unrealized_pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                          </div>
+                                      )}
                                   </div>
                               </div>
                           ))}
