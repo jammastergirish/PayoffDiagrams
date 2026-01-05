@@ -1,5 +1,6 @@
-
 # Payoff Visualizer
+
+<img width="796" height="454" alt="Screenshot 2026-01-05 at 10 12 03" src="https://github.com/user-attachments/assets/bea2750f-0be4-4d8a-bb6e-d1a5c433e8d5" />
 
 A privacy-focused, client-side web application for visualizing stock and option payoff diagrams.
 
@@ -12,6 +13,8 @@ Upload your Interactive Brokers (IBKR) CSV export and instantly analyze your por
 *   **Risk Dashboard**: View Net Delta, Gamma, Theta, and Vega to understand your portfolio's true exposure.
 *   **Advanced Metrics**: Supports Implied Volatility (IV) and Probability of Profit (POP) analysis.
 *   **Instant Insights**: Automatically calculates Breakevens, Max Profit/Loss, and Days to Expiry (DTE).
+
+<img width="798" height="451" alt="Screenshot 2026-01-05 at 10 11 48" src="https://github.com/user-attachments/assets/31c43623-beaf-4dd1-bfb6-555d4476699f" />
 
 ## How to Run
 
