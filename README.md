@@ -13,6 +13,10 @@ Upload your Interactive Brokers (IBKR) CSV export and instantly analyze your por
 *   **Risk Dashboard**: View Net Delta, Gamma, Theta, and Vega to understand your portfolio's true exposure.
 *   **Advanced Metrics**: Supports Implied Volatility (IV) and Probability of Profit (POP) analysis.
 *   **Instant Insights**: Automatically calculates Breakevens, Max Profit/Loss, and Days to Expiry (DTE).
+*   **simulation & Risk Analysis**:
+    *   **T+0 Prediction**: Visualize your "mark-to-market" P&L curve for *today* (including theoretical option pricing) vs. the solid expiration line.
+    *   **IV Simulation**: Stress-test your portfolio against Volatility crushes or spikes (Vega Risk).
+    *   **Date Simulation**: Fast-forward time to see how Theta decay impacts your positions.
 
 <img width="798" height="451" alt="Screenshot 2026-01-05 at 10 11 48" src="https://github.com/user-attachments/assets/31c43623-beaf-4dd1-bfb6-555d4476699f" />
 

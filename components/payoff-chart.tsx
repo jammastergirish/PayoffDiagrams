@@ -18,6 +18,7 @@ interface ChartDataPoint {
   pnl: number; // Total P&L
   stockPnl?: number; // Stock only P&L
   optionsPnl?: number; // Options only P&L
+  t0Pnl?: number; // Theoretical T+0 P&L
 }
 
 interface PayoffChartProps {
@@ -27,6 +28,7 @@ interface PayoffChartProps {
   showStock: boolean;
   showOptions: boolean;
   showCombined: boolean;
+  showT0?: boolean;
 }
 
 export function PayoffChart({
@@ -36,6 +38,7 @@ export function PayoffChart({
   showStock,
   showOptions,
   showCombined,
+  showT0,
 }: PayoffChartProps) {
   const currencyFormatter = (value: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -52,6 +55,7 @@ export function PayoffChart({
       if (showCombined) vals.push(d.pnl);
       if (showStock && d.stockPnl !== undefined) vals.push(d.stockPnl);
       if (showOptions && d.optionsPnl !== undefined) vals.push(d.optionsPnl);
+      if (showT0 && d.t0Pnl !== undefined) vals.push(d.t0Pnl);
       return vals;
   });
   const minY = Math.min(0, ...yValues) * 1.1;
@@ -154,6 +158,18 @@ export function PayoffChart({
               strokeWidth={3}
               dot={false}
               activeDot={{ r: 6, fill: "#F97316", stroke: "#fff" }}
+            />
+          )}
+
+          {showT0 && (
+            <Line
+                type="monotone"
+                dataKey="t0Pnl"
+                name="T+0 (Sim)"
+                stroke="#06b6d4" // Cyan 500
+                strokeWidth={2}
+                dot={false}
+                strokeDasharray="4 4"
             />
           )}
         </LineChart>

@@ -9,7 +9,8 @@ import {
   getBreakevens, 
   calculateMaxRiskReward,
   getPriceRange,
-  parsePositionsFromRows
+  parsePositionsFromRows,
+  calculateTheoreticalPnl
 } from "@/lib/payoff-utils";
 import { FileUpload } from "@/components/file-upload";
 import { PayoffChart } from "@/components/payoff-chart";
@@ -17,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
 
 export function PayoffDashboard() {
   const [positions, setPositions] = useState<Position[]>([]);
@@ -27,6 +29,17 @@ export function PayoffDashboard() {
   const [showStock, setShowStock] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [showCombined, setShowCombined] = useState(true);
+  const [showT0, setShowT0] = useState(false);
+
+  // Simulation State
+  const [ivAdjustment, setIvAdjustment] = useState(0); // 0 = 0% change
+  const [daysOffset, setDaysOffset] = useState(0); // 0 to 90 days
+
+  const targetDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysOffset);
+    return d;
+  }, [daysOffset]);
 
   const handleFileSelect = (file: File) => {
     Papa.parse(file, {
@@ -72,18 +85,25 @@ export function PayoffDashboard() {
     const stockPnlArr = stockPos.length > 0 ? calculatePnl(stockPos, prices) : undefined;
     const optionsPnlArr = optionPos.length > 0 ? calculatePnl(optionPos, prices) : undefined;
 
+    const breakevens = getBreakevens(prices, pnl);
+    const stats = calculateMaxRiskReward(activePositions);
+
+    // Calculate T+0 P&L if enabled
+    let t0Pnl: number[] | undefined;
+    if (showT0) {
+        t0Pnl = calculateTheoreticalPnl(activePositions, prices, targetDate, ivAdjustment);
+    }
+
     const data = prices.map((price, idx) => ({
         price,
         pnl: pnl[idx],
         stockPnl: stockPnlArr ? stockPnlArr[idx] : undefined,
         optionsPnl: optionsPnlArr ? optionsPnlArr[idx] : undefined,
+        t0Pnl: t0Pnl ? t0Pnl[idx] : undefined,
     }));
 
-    const breakevens = getBreakevens(prices, pnl);
-    const stats = calculateMaxRiskReward(activePositions);
-
     return { data, breakevens, stats };
-  }, [selectedTicker, activePositions, stockPrices]);
+  }, [selectedTicker, activePositions, stockPrices, showT0, ivAdjustment, targetDate]);
 
   const currentPrice = selectedTicker ? (stockPrices[selectedTicker] || 0) : 0;
   const totalUnrealizedPnl = activePositions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
@@ -218,9 +238,65 @@ export function PayoffDashboard() {
                           />
                           <Label htmlFor="show-combined" className="font-bold text-orange-500 cursor-pointer">Combined</Label>
                        </div>
+                       <div className="pl-4 border-l border-white/10 flex items-center gap-2">
+                          <Switch 
+                            checked={showT0} 
+                            onCheckedChange={setShowT0} 
+                            id="show-t0" 
+                            className="data-[state=checked]:bg-cyan-500"
+                          />
+                          <Label htmlFor="show-t0" className="text-cyan-400 cursor-pointer">Show T+0 Prediction</Label>
+                       </div>
                     </div>
                  </CardHeader>
                  <CardContent className="pt-6">
+                    {/* Simulation Controls */}
+                    {showT0 && (
+                        <div className="mb-8 p-4 bg-cyan-950/20 border border-cyan-500/20 rounded-lg grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <div className="flex justify-between mb-2">
+                                    <Label className="text-cyan-100">Implied Volatility (IV) Adjustment</Label>
+                                    <span className={`text-sm font-mono ${ivAdjustment > 0 ? 'text-green-400' : ivAdjustment < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                        {ivAdjustment > 0 ? '+' : ''}{(ivAdjustment * 100).toFixed(0)}%
+                                    </span>
+                                </div>
+                                <Slider 
+                                    min={-0.5} 
+                                    max={0.5} 
+                                    step={0.01} 
+                                    value={[ivAdjustment]} 
+                                    onValueChange={(vals) => setIvAdjustment(vals[0])}
+                                    className="py-2"
+                                />
+                                <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+                                    <span>-50%</span>
+                                    <span>0%</span>
+                                    <span>+50%</span>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between mb-2">
+                                    <Label className="text-cyan-100">Date Simulation</Label>
+                                    <span className="text-sm font-mono text-cyan-200">
+                                        {targetDate.toLocaleDateString()} <span className="text-xs text-gray-500">({daysOffset === 0 ? 'Today' : `+${daysOffset}d`})</span>
+                                    </span>
+                                </div>
+                                <Slider 
+                                    min={0} 
+                                    max={180} 
+                                    step={1} 
+                                    value={[daysOffset]} 
+                                    onValueChange={(vals) => setDaysOffset(vals[0])}
+                                    className="py-2"
+                                />
+                                <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+                                    <span>Today</span>
+                                    <span>+6 Months</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <PayoffChart 
                        data={chartData.data} 
                        currentPrice={currentPrice}
@@ -228,6 +304,7 @@ export function PayoffDashboard() {
                        showStock={showStock}
                        showOptions={showOptions}
                        showCombined={showCombined}
+                       showT0={showT0}
                     />
                     
                     {chartData.stats && (

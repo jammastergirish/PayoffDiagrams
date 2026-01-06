@@ -1,4 +1,6 @@
 
+import { blackScholes } from "@/lib/black-scholes";
+
 export interface Position {
   ticker: string;
   position_type: 'stock' | 'call' | 'put';
@@ -192,6 +194,73 @@ export function calculatePnl(positions: Position[], prices: number[]): number[] 
             for (let i = 0; i < prices.length; i++) {
                 const intrinsic = Math.max(0, strike - prices[i]);
                 totalPnl[i] += (intrinsic - costBasis) * qty * 100;
+            }
+        }
+    }
+    return totalPnl;
+}
+
+export function calculateTheoreticalPnl(
+    positions: Position[], 
+    prices: number[], 
+    targetDate: Date, 
+    ivAdjustment: number = 0, // e.g. 0.1 for +10% IV
+    riskFreeRate: number = 0.05
+): number[] {
+    const totalPnl = new Array(prices.length).fill(0);
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    // targetDate is already set to midnight by the caller usually
+
+    for (const pos of positions) {
+        const qty = pos.qty;
+        const costBasis = pos.cost_basis || 0;
+
+        if (pos.position_type === 'stock') {
+            for (let i = 0; i < prices.length; i++) {
+                totalPnl[i] += (prices[i] - costBasis) * qty;
+            }
+        } else {
+            // Option
+            const strike = pos.strike || 0;
+            const expiryStr = pos.expiry; 
+            if (!expiryStr) continue;
+
+            const expiryDate = new Date(expiryStr);
+            // Calculate time to expiry from TARGET date
+            const diffTime = expiryDate.getTime() - targetDate.getTime();
+            const yearsToExpiry = Math.max(0, diffTime / (1000 * 60 * 60 * 24 * 365));
+
+            // If simulated date is past expiry, fallback to intrinsic
+            if (yearsToExpiry <= 0) {
+                 for (let i = 0; i < prices.length; i++) {
+                    let intrinsic = 0;
+                    if (pos.position_type === 'call') intrinsic = Math.max(0, prices[i] - strike);
+                    else intrinsic = Math.max(0, strike - prices[i]);
+                    
+                    totalPnl[i] += (intrinsic - costBasis) * qty * 100;
+                }
+                continue;
+            }
+
+            // IV: Use position's IV if available, else default 50%. Apply adjustment.
+            // pos.iv is usually in percentage e.g. 45.5
+            const baseIv = (pos.iv ? pos.iv / 100 : 0.50);
+            const adjustedIv = Math.max(0.001, baseIv * (1 + ivAdjustment));
+
+            for (let i = 0; i < prices.length; i++) {
+                const price = prices[i];
+                const theoreticalPrice = blackScholes(
+                    pos.position_type, 
+                    price, 
+                    strike, 
+                    yearsToExpiry, 
+                    riskFreeRate, 
+                    adjustedIv
+                );
+                
+                // Profit = (Exit Price - Entry Price) * Qty * 100
+                totalPnl[i] += (theoreticalPrice - costBasis) * qty * 100;
             }
         }
     }
