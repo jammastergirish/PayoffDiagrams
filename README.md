@@ -20,33 +20,45 @@ Upload your Interactive Brokers (IBKR) CSV export and instantly analyze your por
 
 <img width="798" height="451" alt="Screenshot 2026-01-05 at 10 11 48" src="https://github.com/user-attachments/assets/31c43623-beaf-4dd1-bfb6-555d4476699f" />
 
+## Architecture
+
+*   **Frontend**: Next.js application (in `frontend/`).
+*   **Backend** (Optional): Python FastAPI (in `backend/`) for live IBKR connection.
+
 ## How to Run
 
-1.  Install dependencies (first time only):
-    ```bash
-    npm install
-    ```
+### Quick Start (Recommended)
+Use the helper script to start both the frontend and backend (if available).
 
-2.  Start the development server:
+```bash
+sh run.sh
+```
+
+### Manual Setup
+
+1.  **Frontend Only (Lite Mode)**:
     ```bash
+    cd frontend
+    npm install
     npm run dev
     ```
 
-3.  Open [http://localhost:3000](http://localhost:3000) in your browser.
+2.  **Backend (Live Mode)**:
+    ```bash
+    pip install -r backend/requirements.txt
+    python3 -m uvicorn backend.main:app --reload --port 8000
+    ```
+
+## Live Mode (IBKR)
+To use Live Mode with Interactive Brokers:
+1.  Open TWS or IB Gateway.
+2.  Enable API on port **7497**.
+3.  Run `sh run.sh`.
+4.  The app will auto-detect the connection.
 
 ## Testing
 
-Unit tests are powered by Vitest and live under `tests/`.
-
-```bash
-npm test
-```
-
-For watch mode:
-
-```bash
-npm run test:watch
-```
+Unit tests are powered by Vitest and live under `frontend/tests/`.
 
 ## Data Requirement (IBKR Export)
 

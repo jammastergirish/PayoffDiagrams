@@ -20,10 +20,16 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 
+import { checkBackendHealth, fetchLivePortfolio } from "@/lib/api-client";
+
 export function PayoffDashboard() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({});
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+
+  // Live Mode State
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'offline'>('checking');
   
   // Toggles
   const [showStock, setShowStock] = useState(false);
@@ -40,6 +46,33 @@ export function PayoffDashboard() {
     d.setDate(d.getDate() + daysOffset);
     return d;
   }, [daysOffset]);
+
+  // Initial Backend Check
+  useState(() => {
+      checkBackendHealth().then((health) => {
+          if (health && health.status === 'ok') {
+              setIsLiveMode(true);
+              if (health.ib_connected) {
+                  setBackendStatus('connected');
+                  // Auto-fetch positions
+                  fetchLivePortfolio().then(pos => {
+                      setPositions(pos);
+                      // Setup live polling every 5s
+                      const interval = setInterval(async () => {
+                          const updated = await fetchLivePortfolio();
+                          setPositions(updated);
+                      }, 5000);
+                      return () => clearInterval(interval);
+                  });
+              } else {
+                  setBackendStatus('connected'); // Backend is connected, but TWS might not be
+                  // We might want a new status 'backend_only'
+              }
+          } else {
+              setBackendStatus('offline');
+          }
+      });
+  });
 
   const handleFileSelect = (file: File) => {
     Papa.parse(file, {
@@ -133,10 +166,13 @@ export function PayoffDashboard() {
 
   return (
     <div className="flex flex-col gap-6">
-       {!positions.length && (
+       {!isLiveMode && !positions.length && (
            <div className="flex flex-col gap-4">
              <div className="rounded-xl border border-white/10 bg-slate-950 p-6 text-sm text-gray-300">
-               <h2 className="text-base font-medium text-white">Interactive Brokers CSV Required</h2>
+               <h2 className="text-base font-medium text-white flex justify-between">
+                   <span>Interactive Brokers CSV Required</span>
+                   <span className="text-xs font-mono text-gray-500 uppercase tracking-widest border border-gray-800 px-2 py-1 rounded">Offline Mode</span>
+               </h2>
                <p className="mt-1 text-gray-400">
                  Export your portfolio from IBKR TWS and upload the CSV here.
                </p>
@@ -162,6 +198,16 @@ export function PayoffDashboard() {
                </div>
              </div>
              <FileUpload onFileSelect={handleFileSelect} />
+           </div>
+       )}
+
+       {isLiveMode && (
+           <div className={`flex items-center gap-2 p-3 rounded-lg text-sm border ${backendStatus === 'connected' ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
+               <div className={`w-2 h-2 rounded-full animate-pulse ${backendStatus === 'connected' ? 'bg-green-500' : 'bg-yellow-500'}`} />
+               {backendStatus === 'connected' ? "Live Connection to IBKR TWS" : "Backend Connected (Waiting for TWS...)"}
+                <span className="ml-auto text-xs font-mono opacity-70">
+                   {backendStatus === 'connected' ? "CONNECTED" : "Loc: 8000 OK / TWS: --"}
+               </span>
            </div>
        )}
 

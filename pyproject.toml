@@ -1,0 +1,27 @@
+[project]
+name = "payoff-visualizer-backend"
+version = "0.1.0"
+description = "FastAPI backend for Payoff Visualizer with IBKR integration"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "ib-insync>=0.9.86",
+    "pandas>=2.0.0",
+    "nest_asyncio>=1.5.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "hypothesis>=6.0.0",
+    "httpx>=0.24.0"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
