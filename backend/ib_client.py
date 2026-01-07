@@ -216,31 +216,20 @@ class IBClient:
                     })
             
             # Extract Account Summary per Account
-            # Request summary
-            # ib_insync's accountSummary() gets everything for the account (or all accounts if no arg).
-            # It does not support 'tags' or 'group' arguments like the TWS API reqAccountSummary.
-            try:
-                account_summary_list = self.ib.accountSummary()
-            except Exception as e:
-                print(f"Error fetching account summary: {e}")
-                account_summary_list = []
-            
+            # Extract Account Summary per Account
             # Structure: { "U123": { "net_liquidation": 0.0, ... } }
             accounts_summary = {}
-            
-            # Define tags we care about for filtering manually
-            target_tags = {
-                "NetLiquidation", "TotalCashValue", "SettledCash", "AccruedCash", "BuyingPower", 
-                "EquityWithLoanValue", "AvailableFunds", "ExcessLiquidity", "DailyPnL", 
-                "UnrealizedPnL", "RealizedPnL"
-            }
 
-            if account_summary_list:
-                for val in account_summary_list:
-                     # val has account, tag, value, currency
-                     if val.tag not in target_tags:
-                         continue
-                     if val.currency == 'USD' or val.tag in ['DailyPnL', 'UnrealizedPnL', 'RealizedPnL']: # PnL often has no currency or base
+            # Fallback to accountValues (populated by reqAccountUpdates)
+            # This avoids "Max number of account summary requests exceeded" (Error 322)
+            account_values = self.ib.accountValues()
+            
+            if account_values:
+                # Debug: Print first few tags to see what we have
+                print(f"DEBUG: Account Values Tags: {list(set(v.tag for v in account_values))[:20]}")
+                
+                for val in account_values:
+                    if val.currency == 'USD': 
                         acc_id = val.account
                         if acc_id not in accounts_summary:
                             accounts_summary[acc_id] = {
@@ -256,12 +245,8 @@ class IBClient:
                             accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
                         elif val.tag == 'RealizedPnL':
                             accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
-                        elif val.tag == 'DailyPnL':
+                        elif val.tag == 'DailyPnL' or val.tag == 'DayPnL': # Check for alternative names
                             accounts_summary[acc_id]["daily_pnl"] = self._safe_float(val.value)
-            
-            # Fallback to accountValues if accountSummary failed (sometimes reqAccountSummary needs subscription)
-            if not accounts_summary:
-                account_values = self.ib.accountValues()
                 if account_values:
                     for val in account_values:
                         if val.currency == 'USD': 
