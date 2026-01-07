@@ -45,6 +45,7 @@ class IBClient:
         self.subscribed_contracts = set()
         self.subscribed_symbols = set()
         self.subscribed_accounts = set()
+        self.account_summary_cache = {} # Cache for live account summary data
 
     def start_loop(self):
         """Runs the IB event loop in a separate thread."""
@@ -58,6 +59,8 @@ class IBClient:
         except Exception as e:
             print(f"IBKR Connection failed: {e}")
             self.connected = False
+
+
 
     async def connect(self):
         """Starts the background thread."""
@@ -118,12 +121,17 @@ class IBClient:
                 # Subscribe to Account Updates to ensure portfolio() is populated
                 if pos.account not in self.subscribed_accounts:
                     try:
+                        print(f"Subscribing to Account Updates for {pos.account}")
                         # Use low-level client method to avoid blocking wait in ib_insync's IB.reqAccountUpdates
                         self.ib.client.reqAccountUpdates(True, pos.account)
                         self.subscribed_accounts.add(pos.account)
                     except Exception as e:
                         print(f"Error subscribing to account updates for {pos.account}: {e}")
 
+            # Now process positions and portfolio items
+            for pos in positions:
+                contract = pos.contract
+                
                 # Ensure we are subscribed to live data
                 self._ensure_market_data(contract)
                 
@@ -132,7 +140,10 @@ class IBClient:
                 
                 # If ticker is None (shouldn't happen if contract is valid but good safety)
                 if ticker is None:
+                    print(f"DEBUG: Ticker not found for {contract.symbol} (ConId: {contract.conId})")
                     continue
+                
+                print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType}")
 
                 current_price = self._safe_float(ticker.marketPrice()) or self._safe_float(ticker.last) or self._safe_float(ticker.close) or 0.0
                 prior_close = self._safe_float(ticker.close)
@@ -181,7 +192,7 @@ class IBClient:
                 pos_daily_pnl = 0.0
                 if current_price > 0 and prior_close > 0:
                     pos_daily_pnl = (current_price - prior_close) * self._safe_float(pos.position) * multiplier
-
+                
                 if contract.secType == 'STK':
                     mapped_positions.append({
                         "ticker": contract.symbol,
@@ -238,17 +249,14 @@ class IBClient:
                     })
             
             # Extract Account Summary per Account
+            # Use ib.accountValues() which is populated by reqAccountUpdates
             # Structure: { "U123": { "net_liquidation": 0.0, ... } }
             accounts_summary = {}
 
             # Fallback to accountValues (populated by reqAccountUpdates)
-            # This avoids "Max number of account summary requests exceeded" (Error 322)
             account_values = self.ib.accountValues()
             
             if account_values:
-                # Debug: Print first few tags to see what we have
-                # print(f"DEBUG: Account Values Tags: {list(set(v.tag for v in account_values))[:20]}")
-                
                 for val in account_values:
                     if val.currency == 'USD': 
                         acc_id = val.account
@@ -266,7 +274,7 @@ class IBClient:
                             accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
                         elif val.tag == 'RealizedPnL':
                             accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
-                        elif val.tag == 'DailyPnL' or val.tag == 'DayPnL': # Check for alternative names
+                        elif val.tag == 'DayPnL' or val.tag == 'DailyPnL': # Check for alternative names
                             accounts_summary[acc_id]["daily_pnl"] = self._safe_float(val.value)
             
             # If API daily_pnl is 0 (missing), use our manual aggregation
@@ -277,7 +285,6 @@ class IBClient:
                     # Add realized P&L since manual is just Unrealized Daily Change
                     # Daily Total = Unrealized Daily Change + Realized Today
                     summary['daily_pnl'] = manual_daily_sum + summary['realized_pnl']
-
 
             # If a position exists for an account that had no summary (unlikely but possible), ensure it exists
             # Also get list of all accounts for the frontend dropdown
