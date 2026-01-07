@@ -22,10 +22,32 @@ import { Slider } from "@/components/ui/slider";
 
 import { checkBackendHealth, fetchLivePortfolio } from "@/lib/api-client";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AccountSummary } from "@/lib/payoff-utils";
+
 export function PayoffDashboard() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({});
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  
+  // Account State
+  const [accounts, setAccounts] = useState<string[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<string>("All");
+  const [accountSummaries, setAccountSummaries] = useState<Record<string, AccountSummary>>({});
+  
+  // Computed summary based on selection
+  const activeSummary = useMemo(() => {
+      if (selectedAccount !== "All" && accountSummaries[selectedAccount]) {
+          return accountSummaries[selectedAccount];
+      }
+      return null;
+  }, [selectedAccount, accountSummaries]);
 
   // Live Mode State
   const [isLiveMode, setIsLiveMode] = useState(false);
@@ -55,18 +77,70 @@ export function PayoffDashboard() {
               if (health.ib_connected) {
                   setBackendStatus('connected');
                   // Auto-fetch positions
-                  fetchLivePortfolio().then(pos => {
+                  fetchLivePortfolio().then(data => {
+                      const pos = data.positions;
                       setPositions(pos);
+                      
+                      // Handle Accounts
+                      if (data.accounts && data.accounts.length > 0) {
+                          setAccounts(data.accounts);
+                          // Default to first if not "All" maybe? Or keep All.
+                          // If current selection is invalid, reset to All
+                          if (selectedAccount !== 'All' && !data.accounts.includes(selectedAccount)) {
+                              setSelectedAccount('All');
+                          }
+                      }
+                      
+                      if (data.summary) {
+                          setAccountSummaries(data.summary);
+                      }
+                      
+                      // Extract prices from live data to populate stockPrices map
+                      const livePrices: Record<string, number> = {};
+                      pos.forEach(p => {
+                          if (p.ticker) {
+                             if (p.position_type === 'stock' && p.current_price) {
+                                 livePrices[p.ticker] = p.current_price;
+                             } else if (p.position_type !== 'stock' && p.underlying_price) {
+                                  livePrices[p.ticker] = p.underlying_price;
+                             }
+                          }
+                      });
+                      setStockPrices(prev => ({ ...prev, ...livePrices }));
+                      
+                      // Initial selection if needed
+                      if (pos.length > 0 && !selectedTicker) {
+                           const tickers = Array.from(new Set(pos.map(p => p.ticker))).sort();
+                           if (tickers.length > 0) setSelectedTicker(tickers[0]);
+                      }
+
                       // Setup live polling every 5s
                       const interval = setInterval(async () => {
-                          const updated = await fetchLivePortfolio();
+                          const updatedData = await fetchLivePortfolio();
+                          const updated = updatedData.positions;
                           setPositions(updated);
+                          
+                          if (updatedData.accounts) setAccounts(updatedData.accounts);
+                          if (updatedData.summary) setAccountSummaries(updatedData.summary);
+                          
+                          // Update prices again
+                          const updatedPrices: Record<string, number> = {};
+                          updated.forEach(p => {
+                              if (p.ticker) {
+                                 if (p.position_type === 'stock' && p.current_price) {
+                                     updatedPrices[p.ticker] = p.current_price;
+                                 } else if (p.position_type !== 'stock' && p.underlying_price) {
+                                      updatedPrices[p.ticker] = p.underlying_price;
+                                 }
+                              }
+                          });
+                          setStockPrices(prev => ({ ...prev, ...updatedPrices }));
+                          
                       }, 5000);
                       return () => clearInterval(interval);
                   });
               } else {
                   setBackendStatus('connected'); // Backend is connected, but TWS might not be
-                  // We might want a new status 'backend_only'
               }
           } else {
               setBackendStatus('offline');
@@ -93,13 +167,27 @@ export function PayoffDashboard() {
   };
 
   const tickers = useMemo(() => {
-    return Array.from(new Set(positions.map(p => p.ticker))).sort();
-  }, [positions]);
+    // Filter positions first by Account
+    let visible = positions;
+    if (selectedAccount !== 'All') {
+        visible = positions.filter(p => p.account === selectedAccount);
+    }
+    return Array.from(new Set(visible.map(p => p.ticker))).sort();
+  }, [positions, selectedAccount]);
 
   const activePositions = useMemo(() => {
+    // If no ticker selected, return empty
     if (!selectedTicker) return [];
-    return positions.filter(p => p.ticker === selectedTicker);
-  }, [positions, selectedTicker]);
+    
+    // Base filter by Ticker
+    let filtered = positions.filter(p => p.ticker === selectedTicker);
+    
+    // Filter by Account
+    if (selectedAccount !== 'All') {
+        filtered = filtered.filter(p => p.account === selectedAccount);
+    }
+    return filtered;
+  }, [positions, selectedTicker, selectedAccount]);
 
   const chartData = useMemo(() => {
     if (!selectedTicker || activePositions.length === 0) return { data: [], breakevens: [], stats: null };
@@ -205,26 +293,88 @@ export function PayoffDashboard() {
            <div className={`flex items-center gap-2 p-3 rounded-lg text-sm border ${backendStatus === 'connected' ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
                <div className={`w-2 h-2 rounded-full animate-pulse ${backendStatus === 'connected' ? 'bg-green-500' : 'bg-yellow-500'}`} />
                {backendStatus === 'connected' ? "Live Connection to IBKR TWS" : "Backend Connected (Waiting for TWS...)"}
-                <span className="ml-auto text-xs font-mono opacity-70">
-                   {backendStatus === 'connected' ? "CONNECTED" : "Loc: 8000 OK / TWS: --"}
-               </span>
+                <div className="ml-auto flex items-center gap-4">
+                   {/* Account Selector */}
+                   {accounts.length > 0 && (
+                       <div className="flex items-center gap-2">
+                           <span className="text-gray-400 text-xs uppercase tracking-wider">Account:</span>
+                           <Select value={selectedAccount} onValueChange={setSelectedAccount}>
+                             <SelectTrigger className="w-[180px] bg-slate-900 border-white/10 text-white h-8 text-xs">
+                               <SelectValue placeholder="Select Account" />
+                             </SelectTrigger>
+                             <SelectContent className="bg-slate-900 border-white/10 text-white">
+                               <SelectItem value="All">All Accounts</SelectItem>
+                               {accounts.map(acc => (
+                                   <SelectItem key={acc} value={acc}>{acc}</SelectItem>
+                               ))}
+                             </SelectContent>
+                           </Select>
+                       </div>
+                   )}
+                   <span className="text-xs font-mono opacity-70 border-l border-white/10 pl-4">
+                       {backendStatus === 'connected' ? "CONNECTED" : "Loc: 8000 OK / TWS: --"}
+                   </span>
+                </div>
            </div>
        )}
 
        {positions.length > 0 && (
          <div className="flex flex-col gap-6">
-            {/* Total Portfolio P&L */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                <div className={`p-4 rounded-lg border ${portfolioUnrealizedPnl >= 0 ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30"}`}>
-                    <p className={`text-xs font-medium uppercase tracking-wider ${portfolioUnrealizedPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                        Total Unrealized P&L
-                    </p>
-                    <p className={`text-2xl font-light mt-1 ${portfolioUnrealizedPnl >= 0 ? "text-green-300" : "text-red-300"}`}>
-                            {portfolioUnrealizedPnl >= 0 ? "+" : ""}{formatCurrency(portfolioUnrealizedPnl)}
-                    </p>
-                </div>
-                {/* Placeholders for future top items can go here */}
+           {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {accountSummaries && selectedAccount !== 'All' && accountSummaries[selectedAccount] && (
+             <>
+                <Card className="bg-slate-900 border-white/10 shadow-lg">
+                  <CardContent className="pt-6">
+                    <div className="text-sm font-medium text-gray-400">Account Net Liq</div>
+                    <div className="text-2xl font-bold text-white mt-2">
+                      {formatCurrency(accountSummaries[selectedAccount].net_liquidation)}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-slate-900 border-white/10 shadow-lg">
+                  <CardContent className="pt-6">
+                    <div className="text-sm font-medium text-gray-400">Today's P&L</div>
+                    <div className={`text-2xl font-bold mt-2 ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].daily_pnl)}
+                    </div>
+                  </CardContent>
+                </Card>
+             </>
+        )}
+        {accountSummaries && selectedAccount === 'All' && (
+             <>
+                <Card className="bg-slate-900 border-white/10 shadow-lg">
+                  <CardContent className="pt-6">
+                    <div className="text-sm font-medium text-gray-400">Total Net Liq</div>
+                    <div className="text-2xl font-bold text-white mt-2">
+                      {formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.net_liquidation, 0))}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-slate-900 border-white/10 shadow-lg">
+                  <CardContent className="pt-6">
+                    <div className="text-sm font-medium text-gray-400">Total Today's P&L</div>
+                    <div className={`text-2xl font-bold mt-2 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
+                    </div>
+                  </CardContent>
+                </Card>
+             </>
+        )}
+
+        <Card className="bg-slate-900 border-white/10 shadow-lg">
+          <CardContent className="pt-6">
+            <div className="text-sm font-medium text-gray-400">Total Unrealized P&L</div>
+            <div className={`text-2xl font-bold mt-2 ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatCurrency(portfolioUnrealizedPnl)}
             </div>
+            <div className="text-xs text-gray-500 mt-1">
+              across {positions.length} positions
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {/* Sidebar */}

@@ -1,8 +1,9 @@
 import asyncio
 import threading
-from ib_insync import *
+from typing import Optional, List, Literal
 from dataclasses import dataclass
-from typing import List, Optional, Literal
+from ib_insync import IB, Stock, Option, util
+import math
 import nest_asyncio
 
 # Apply nest_asyncio to allow nested loops if needed, though threading should isolate it
@@ -18,6 +19,9 @@ class PositionModel:
     dte: Optional[int] = None
     cost_basis: Optional[float] = 0.0
     unrealized_pnl: Optional[float] = 0.0
+    # Live Data
+    current_price: Optional[float] = 0.0 # Underlying price for stocks, Mark for options
+    underlying_price: Optional[float] = None
     # Greeks
     delta: Optional[float] = None
     gamma: Optional[float] = None
@@ -34,6 +38,10 @@ class IBClient:
         self.connected = False
         self._thread = None
         self._loop = None
+        # Cache for live market data tickers
+        self.market_data = {} 
+        self.subscribed_contracts = set()
+        self.subscribed_symbols = set()
 
     def start_loop(self):
         """Runs the IB event loop in a separate thread."""
@@ -53,40 +61,112 @@ class IBClient:
         if not self.connected:
             self._thread = threading.Thread(target=self.start_loop, daemon=True)
             self._thread.start()
-            # Give it a moment to connect
             await asyncio.sleep(1)
+
+    def _safe_float(self, val, default=0.0):
+        """Converts value to float, handling None and NaN."""
+        if val is None:
+            return default
+        try:
+            f_val = float(val)
+            if math.isnan(f_val) or math.isinf(f_val):
+                return default
+            return f_val
+        except (ValueError, TypeError):
+            return default
+
+    def _ensure_market_data(self, contract):
+        """Subscribes to market data if not already subscribed."""
+        if contract.conId not in self.subscribed_contracts:
+            # Generic ticks: 221=Mark Price (good for offline/charts)
+            self.ib.reqMktData(contract, '221', False, False)
+            self.subscribed_contracts.add(contract.conId)
+            # Also subscribe to underlying for options to get 'underlying_price'
+            # Note: For simplicity, we rely on option greeks to give underlying price often, or request separately
+            if contract.secType == 'OPT':
+                # We could request the underlying contract too, but let's see if option market data is enough first
+                pass
 
     def get_positions(self) -> List[dict]:
         if not self.connected:
             return []
         
         try:
-            # Accessing ib.positions() from another thread is thread-safe in ib_insync usually
-            # but safer to copy data
             positions = self.ib.positions()
             portfolio = self.ib.portfolio()
             
-            # Map logic to match PositionModel
             mapped_positions = []
             
             for pos in positions:
                 contract = pos.contract
                 
-                # Simple stock mapping
+                # Check for nulls
+                if not contract: continue
+
+                # Ensure we are subscribed to live data
+                self._ensure_market_data(contract)
+                
+                # Get latest ticker snapshot
+                ticker = self.ib.ticker(contract)
+                
+                # If ticker is None (shouldn't happen if contract is valid but good safety)
+                if ticker is None:
+                    continue
+
+                current_price = self._safe_float(ticker.marketPrice()) or self._safe_float(ticker.last) or self._safe_float(ticker.close) or 0.0
+                
+                # Greeks extraction
+                delta, gamma, theta, vega, iv, und_price = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+                if ticker.modelGreeks:
+                    delta = self._safe_float(ticker.modelGreeks.delta)
+                    gamma = self._safe_float(ticker.modelGreeks.gamma)
+                    theta = self._safe_float(ticker.modelGreeks.theta)
+                    vega = self._safe_float(ticker.modelGreeks.vega)
+                    iv = self._safe_float(ticker.modelGreeks.impliedVol)
+                    und_price = self._safe_float(ticker.modelGreeks.undPrice)
+                
+                # Fallback for underlying price from live stock ticker if option
+                # If it's an option, we need the underlying price for the diagram
+                if contract.secType == 'OPT' and (und_price == 0 or und_price is None):
+                     found_price = 0.0
+                     # Search through all tickers we are connected to
+                     for t in self.ib.tickers():
+                         if t.contract.symbol == contract.symbol and t.contract.secType == 'STK':
+                             found_price = self._safe_float(t.marketPrice()) or self._safe_float(t.last) or self._safe_float(t.close)
+                             if found_price > 0:
+                                 break
+                     
+                     if found_price == 0:
+                         # Automatically subscribe to the underlying Stock if not done yet
+                         if contract.symbol not in self.subscribed_symbols:
+                            try:
+                                u_contract = Stock(contract.symbol, 'SMART', 'USD')
+                                self.ib.reqMktData(u_contract, '221', False, False)
+                                self.subscribed_symbols.add(contract.symbol)
+                            except:
+                                pass
+                     else:
+                         und_price = found_price
+
                 if contract.secType == 'STK':
                     mapped_positions.append({
                         "ticker": contract.symbol,
+                        "account": pos.account,
                         "position_type": "stock",
-                        "qty": pos.position,
-                        "cost_basis": pos.avgCost
+                        "qty": self._safe_float(pos.position),
+                        "cost_basis": self._safe_float(pos.avgCost),
+                        "current_price": current_price,
+                        "unrealized_pnl": (current_price - self._safe_float(pos.avgCost)) * self._safe_float(pos.position) if current_price else 0.0,
+                        "delta": 1.0,
+                        "gamma": 0.0, "theta": 0.0, "vega": 0.0, "iv": 0.0
                     })
                 
-                # Option mapping
                 elif contract.secType == 'OPT':
                     expiry_formatted = f"{contract.lastTradeDateOrContractMonth[:4]}-{contract.lastTradeDateOrContractMonth[4:6]}-{contract.lastTradeDateOrContractMonth[6:]}"
                     
-                    # Try to find portfolio item for PnP
-                    pnl = 0
+                    # PnL from portfolio is often delayed/static compared to live calc
+                    # but let's prefer portfolio PnL if available as it matches account window
+                    pnl = 0.0
                     for item in portfolio:
                         if item.contract.conId == contract.conId:
                             pnl = item.unrealizedPNL
@@ -94,22 +174,67 @@ class IBClient:
                     
                     mapped_positions.append({
                         "ticker": contract.symbol,
+                        "account": pos.account,
                         "position_type": "call" if contract.right == 'C' else "put",
-                        "qty": pos.position,
-                        "strike": contract.strike,
+                        "qty": self._safe_float(pos.position),
+                        "strike": self._safe_float(contract.strike),
                         "expiry": expiry_formatted,
-                        "cost_basis": pos.avgCost,
-                        "unrealized_pnl": pnl
+                        "cost_basis": self._safe_float(pos.avgCost),
+                        "unrealized_pnl": self._safe_float(pnl),
+                        "current_price": current_price,
+                        "underlying_price": und_price,
+                        "delta": delta,
+                        "gamma": gamma,
+                        "theta": theta,
+                        "vega": vega,
+                        "iv": iv * 100 # Convert to percentage for frontend
                     })
             
-            return mapped_positions
+            # Extract Account Summary per Account
+            # We use accountValues() which mimics TWS Account Window
+            account_values = self.ib.accountValues()
+            
+            # Structure: { "U123": { "net_liquidation": 0.0, ... } }
+            accounts_summary = {}
+            
+            if account_values:
+                for val in account_values:
+                    # TWS returns many keys, we filter for what we need. 
+                    # Values are strings, often with currency like "200.00"
+                    if val.currency == 'USD': # Assuming USD account for simplicity
+                        acc_id = val.account
+                        if acc_id not in accounts_summary:
+                            accounts_summary[acc_id] = {
+                                "net_liquidation": 0.0,
+                                "unrealized_pnl": 0.0,
+                                "realized_pnl": 0.0,
+                                "daily_pnl": 0.0
+                            }
+                            
+                        if val.tag == 'NetLiquidation':
+                            accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
+                        elif val.tag == 'UnrealizedPnL':
+                            accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
+                        elif val.tag == 'RealizedPnL':
+                            accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
+            
+            # If a position exists for an account that had no summary (unlikely but possible), ensure it exists
+            # Also get list of all accounts for the frontend dropdown
+            all_accounts = sorted(list(set([p['account'] for p in mapped_positions] + list(accounts_summary.keys()))))
+
+            return {
+                "accounts": all_accounts,
+                "positions": mapped_positions,
+                "summary": accounts_summary
+            }
         except Exception as e:
             print(f"Error fetching positions: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def disconnect(self):
         if self.connected:
             self.ib.disconnect()
-            self.connected = False
 
 ib_client = IBClient()

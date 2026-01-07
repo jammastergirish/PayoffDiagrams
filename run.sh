@@ -1,5 +1,7 @@
 #!/bin/bash
 
+clear
+
 # Kill background processes on exit
 trap 'kill $(jobs -p)' EXIT
 

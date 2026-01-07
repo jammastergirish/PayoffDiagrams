@@ -42,5 +42,10 @@ def get_portfolio():
     
     # In a real app we might want to await this if it was fetching live data
     # positions() is usually cached in ib_insync
-    positions = ib_client.get_positions()
-    return {"positions": positions}
+    data = ib_client.get_positions()
+    
+    # Legacy check: if it's a list (old IBClient), wrap it. 
+    # If it's a dict (New IBClient with summary), return as is.
+    if isinstance(data, list):
+        return {"positions": data}
+    return data

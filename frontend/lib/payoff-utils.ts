@@ -16,6 +16,16 @@ export interface Position {
   vega?: number;
   iv?: number;
   pop?: number;
+  current_price?: number;
+  underlying_price?: number;
+  account?: string;
+}
+
+export interface AccountSummary {
+    net_liquidation: number;
+    unrealized_pnl: number;
+    realized_pnl: number;
+    daily_pnl: number;
 }
 
 export function cleanNumber(value: unknown): number {
