@@ -11,6 +11,9 @@ echo "🚀 Starting Payoff Visualizer..."
 echo "🐍 Starting Backend..."
 
 # Run Uvicorn via uv
+# Ensure port 8000 is free
+lsof -t -i:8000 | xargs kill -9 2>/dev/null || true
+
 # uv automatically handles venv creation and dependency installation
 uv run uvicorn backend.main:app --reload --port 8000 &
 BACKEND_PID=$!

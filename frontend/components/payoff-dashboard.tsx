@@ -318,6 +318,16 @@ export function PayoffDashboard() {
            </div>
        )}
 
+       {positions.length === 0 && (
+           <div className="flex flex-col items-center justify-center p-12 text-center border-t border-white/5">
+                <div className="text-gray-500 mb-2 text-lg">No positions found</div>
+                <div className="text-gray-600 text-sm max-w-md">
+                    Check your TWS connection and ensure you have open positions in the selected account. 
+                    If you are using a paper trading account, make sure it is active.
+                </div>
+           </div>
+       )}
+
        {positions.length > 0 && (
          <div className="flex flex-col gap-6">
            {/* Key Metrics */}

@@ -29,11 +29,13 @@ class PositionModel:
     vega: Optional[float] = None
     iv: Optional[float] = None
 
+import random
+
 class IBClient:
-    def __init__(self, host='127.0.0.1', port=7496, client_id=1):
+    def __init__(self, host='127.0.0.1', port=7496, client_id=None):
         self.host = host
         self.port = port
-        self.client_id = client_id
+        self.client_id = client_id if client_id is not None else random.randint(1000, 9999)
         self.ib = IB()
         self.connected = False
         self._thread = None
@@ -42,6 +44,7 @@ class IBClient:
         self.market_data = {} 
         self.subscribed_contracts = set()
         self.subscribed_symbols = set()
+        self.subscribed_accounts = set()
 
     def start_loop(self):
         """Runs the IB event loop in a separate thread."""
@@ -94,6 +97,8 @@ class IBClient:
         try:
             positions = self.ib.positions()
             portfolio = self.ib.portfolio()
+            print(f"DEBUG: Found {len(positions)} positions from IB")
+            print(f"DEBUG: Found {len(portfolio)} portfolio items from IB")
             
             mapped_positions = []
             
@@ -102,6 +107,15 @@ class IBClient:
                 
                 # Check for nulls
                 if not contract: continue
+                
+                # Subscribe to Account Updates to ensure portfolio() is populated
+                if pos.account not in self.subscribed_accounts:
+                    try:
+                        # Use low-level client method to avoid blocking wait in ib_insync's IB.reqAccountUpdates
+                        self.ib.client.reqAccountUpdates(True, pos.account)
+                        self.subscribed_accounts.add(pos.account)
+                    except Exception as e:
+                        print(f"Error subscribing to account updates for {pos.account}: {e}")
 
                 # Ensure we are subscribed to live data
                 self._ensure_market_data(contract)
@@ -167,10 +181,21 @@ class IBClient:
                     # PnL from portfolio is often delayed/static compared to live calc
                     # but let's prefer portfolio PnL if available as it matches account window
                     pnl = 0.0
+                    pnl = 0.0
+                    found_in_portfolio = False
                     for item in portfolio:
-                        if item.contract.conId == contract.conId:
+                        # Match by conId AND Account
+                        if item.contract.conId == contract.conId and item.account == pos.account:
                             pnl = item.unrealizedPNL
+                            found_in_portfolio = True
                             break
+                    
+                    # Fallback live P&L calculation if portfolio data missing/zero but we have live prices
+                    # Some portfolio items might be missing or zero if not subscribed
+                    if (pnl == 0.0 or not found_in_portfolio) and current_price > 0:
+                         # (Mark - AvgCost) * Qty * Multiplier
+                         # Using 100 as multiplier for standard US options.
+                         pnl = (current_price - self._safe_float(pos.avgCost)) * self._safe_float(pos.position) * 100.0
                     
                     mapped_positions.append({
                         "ticker": contract.symbol,
@@ -191,17 +216,31 @@ class IBClient:
                     })
             
             # Extract Account Summary per Account
-            # We use accountValues() which mimics TWS Account Window
-            account_values = self.ib.accountValues()
+            # Request summary
+            # ib_insync's accountSummary() gets everything for the account (or all accounts if no arg).
+            # It does not support 'tags' or 'group' arguments like the TWS API reqAccountSummary.
+            try:
+                account_summary_list = self.ib.accountSummary()
+            except Exception as e:
+                print(f"Error fetching account summary: {e}")
+                account_summary_list = []
             
             # Structure: { "U123": { "net_liquidation": 0.0, ... } }
             accounts_summary = {}
             
-            if account_values:
-                for val in account_values:
-                    # TWS returns many keys, we filter for what we need. 
-                    # Values are strings, often with currency like "200.00"
-                    if val.currency == 'USD': # Assuming USD account for simplicity
+            # Define tags we care about for filtering manually
+            target_tags = {
+                "NetLiquidation", "TotalCashValue", "SettledCash", "AccruedCash", "BuyingPower", 
+                "EquityWithLoanValue", "AvailableFunds", "ExcessLiquidity", "DailyPnL", 
+                "UnrealizedPnL", "RealizedPnL"
+            }
+
+            if account_summary_list:
+                for val in account_summary_list:
+                     # val has account, tag, value, currency
+                     if val.tag not in target_tags:
+                         continue
+                     if val.currency == 'USD' or val.tag in ['DailyPnL', 'UnrealizedPnL', 'RealizedPnL']: # PnL often has no currency or base
                         acc_id = val.account
                         if acc_id not in accounts_summary:
                             accounts_summary[acc_id] = {
@@ -217,10 +256,36 @@ class IBClient:
                             accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
                         elif val.tag == 'RealizedPnL':
                             accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
+                        elif val.tag == 'DailyPnL':
+                            accounts_summary[acc_id]["daily_pnl"] = self._safe_float(val.value)
+            
+            # Fallback to accountValues if accountSummary failed (sometimes reqAccountSummary needs subscription)
+            if not accounts_summary:
+                account_values = self.ib.accountValues()
+                if account_values:
+                    for val in account_values:
+                        if val.currency == 'USD': 
+                            acc_id = val.account
+                            if acc_id not in accounts_summary:
+                                accounts_summary[acc_id] = {
+                                    "net_liquidation": 0.0,
+                                    "unrealized_pnl": 0.0,
+                                    "realized_pnl": 0.0,
+                                    "daily_pnl": 0.0
+                                }
+                                
+                            if val.tag == 'NetLiquidation':
+                                accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
+                            elif val.tag == 'UnrealizedPnL':
+                                accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
+                            elif val.tag == 'RealizedPnL':
+                                accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
             
             # If a position exists for an account that had no summary (unlikely but possible), ensure it exists
             # Also get list of all accounts for the frontend dropdown
             all_accounts = sorted(list(set([p['account'] for p in mapped_positions] + list(accounts_summary.keys()))))
+            
+            print(f"DEBUG: Returning {len(mapped_positions)} mapped positions")
 
             return {
                 "accounts": all_accounts,
@@ -231,7 +296,12 @@ class IBClient:
             print(f"Error fetching positions: {e}")
             import traceback
             traceback.print_exc()
-            return []
+            traceback.print_exc()
+            return {
+                "accounts": [],
+                "positions": [],
+                "summary": {}
+            }
 
     def disconnect(self):
         if self.connected:
