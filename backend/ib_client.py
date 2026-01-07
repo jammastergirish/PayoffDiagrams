@@ -107,6 +107,13 @@ class IBClient:
                 
                 # Check for nulls
                 if not contract: continue
+
+                # Fix for Error 321: Ensure Exchange and Currency are set
+                # IBKR positions sometimes have empty exchange for options
+                if not contract.exchange:
+                    contract.exchange = 'SMART'
+                if not contract.currency:
+                    contract.currency = 'USD'
                 
                 # Subscribe to Account Updates to ensure portfolio() is populated
                 if pos.account not in self.subscribed_accounts:
@@ -128,6 +135,7 @@ class IBClient:
                     continue
 
                 current_price = self._safe_float(ticker.marketPrice()) or self._safe_float(ticker.last) or self._safe_float(ticker.close) or 0.0
+                prior_close = self._safe_float(ticker.close)
                 
                 # Greeks extraction
                 delta, gamma, theta, vega, iv, und_price = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
@@ -162,6 +170,18 @@ class IBClient:
                      else:
                          und_price = found_price
 
+                # Calculate Daily P&L Manually
+                # (Mark - Prior Close) * Qty * Multiplier
+                # Multiplier is usually 1 for STK, 100 for OPT
+                if contract.secType == 'OPT':
+                    multiplier = 100.0
+                else:
+                    multiplier = 1.0
+                
+                pos_daily_pnl = 0.0
+                if current_price > 0 and prior_close > 0:
+                    pos_daily_pnl = (current_price - prior_close) * self._safe_float(pos.position) * multiplier
+
                 if contract.secType == 'STK':
                     mapped_positions.append({
                         "ticker": contract.symbol,
@@ -171,6 +191,7 @@ class IBClient:
                         "cost_basis": self._safe_float(pos.avgCost),
                         "current_price": current_price,
                         "unrealized_pnl": (current_price - self._safe_float(pos.avgCost)) * self._safe_float(pos.position) if current_price else 0.0,
+                        "daily_pnl": pos_daily_pnl,
                         "delta": 1.0,
                         "gamma": 0.0, "theta": 0.0, "vega": 0.0, "iv": 0.0
                     })
@@ -206,6 +227,7 @@ class IBClient:
                         "expiry": expiry_formatted,
                         "cost_basis": self._safe_float(pos.avgCost),
                         "unrealized_pnl": self._safe_float(pnl),
+                        "daily_pnl": pos_daily_pnl,
                         "current_price": current_price,
                         "underlying_price": und_price,
                         "delta": delta,
@@ -216,7 +238,6 @@ class IBClient:
                     })
             
             # Extract Account Summary per Account
-            # Extract Account Summary per Account
             # Structure: { "U123": { "net_liquidation": 0.0, ... } }
             accounts_summary = {}
 
@@ -226,7 +247,7 @@ class IBClient:
             
             if account_values:
                 # Debug: Print first few tags to see what we have
-                print(f"DEBUG: Account Values Tags: {list(set(v.tag for v in account_values))[:20]}")
+                # print(f"DEBUG: Account Values Tags: {list(set(v.tag for v in account_values))[:20]}")
                 
                 for val in account_values:
                     if val.currency == 'USD': 
@@ -247,25 +268,17 @@ class IBClient:
                             accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
                         elif val.tag == 'DailyPnL' or val.tag == 'DayPnL': # Check for alternative names
                             accounts_summary[acc_id]["daily_pnl"] = self._safe_float(val.value)
-                if account_values:
-                    for val in account_values:
-                        if val.currency == 'USD': 
-                            acc_id = val.account
-                            if acc_id not in accounts_summary:
-                                accounts_summary[acc_id] = {
-                                    "net_liquidation": 0.0,
-                                    "unrealized_pnl": 0.0,
-                                    "realized_pnl": 0.0,
-                                    "daily_pnl": 0.0
-                                }
-                                
-                            if val.tag == 'NetLiquidation':
-                                accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
-                            elif val.tag == 'UnrealizedPnL':
-                                accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
-                            elif val.tag == 'RealizedPnL':
-                                accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
             
+            # If API daily_pnl is 0 (missing), use our manual aggregation
+            # This handles accounts where 'DailyPnL' tag is not sent
+            for acc_id, summary in accounts_summary.items():
+                if summary['daily_pnl'] == 0.0:
+                    manual_daily_sum = sum(p.get('daily_pnl', 0.0) for p in mapped_positions if p['account'] == acc_id)
+                    # Add realized P&L since manual is just Unrealized Daily Change
+                    # Daily Total = Unrealized Daily Change + Realized Today
+                    summary['daily_pnl'] = manual_daily_sum + summary['realized_pnl']
+
+
             # If a position exists for an account that had no summary (unlikely but possible), ensure it exists
             # Also get list of all accounts for the frontend dropdown
             all_accounts = sorted(list(set([p['account'] for p in mapped_positions] + list(accounts_summary.keys()))))

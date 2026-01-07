@@ -331,7 +331,7 @@ export function PayoffDashboard() {
        {positions.length > 0 && (
          <div className="flex flex-col gap-6">
            {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {accountSummaries && selectedAccount !== 'All' && accountSummaries[selectedAccount] && (
              <>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
