@@ -48,6 +48,8 @@ class IBClient:
         self.account_summary_cache = {} # Cache for live account summary data
         self._account_summary_req_id = 9001
         self._account_summary_group = "All"
+        # NOTE: P&L tags (DayPnL, UnrealizedPnL, RealizedPnL) are NOT valid here!
+        # P&L must be fetched via reqPnL() separately.
         self._account_summary_tags = (
             "AccountType,NetLiquidation,TotalCashValue,SettledCash,AccruedCash,"
             "BuyingPower,EquityWithLoanValue,PreviousDayEquityWithLoanValue,"
@@ -58,10 +60,11 @@ class IBClient:
             "LookAheadMaintMarginReq,LookAheadAvailableFunds,"
             "LookAheadExcessLiquidity,HighestSeverity,DayTradesRemaining,"
             "DayTradesRemainingT+1,DayTradesRemainingT+2,DayTradesRemainingT+3,"
-            "DayTradesRemainingT+4,Leverage,$LEDGER:ALL,UnrealizedPnL,"
-            "RealizedPnL,DayPnL"
+            "DayTradesRemainingT+4,Leverage,$LEDGER:ALL"
         )
         self._account_summary_started = False
+        # P&L subscriptions - reqPnL returns live-updated PnL objects
+        self.pnl_subscriptions = {}  # account -> PnL object
 
     def start_loop(self):
         """Runs the IB event loop in a separate thread."""
@@ -123,6 +126,26 @@ class IBClient:
             self._account_summary_started = True
         except Exception as e:
             print(f"Error requesting account summary: {e}")
+
+    def _ensure_pnl_subscription(self, account: str):
+        """Subscribe to P&L updates for an account using reqPnL.
+        
+        This is the CORRECT way to get dailyPnL, unrealizedPnL, realizedPnL.
+        reqAccountSummary does NOT support these tags despite what one might expect.
+        """
+        if not self.ib.isConnected():
+            return None
+        if account in self.pnl_subscriptions:
+            return self.pnl_subscriptions[account]
+        try:
+            # reqPnL returns a live-updated PnL object with dailyPnL, unrealizedPnL, realizedPnL
+            pnl = self.ib.reqPnL(account, '')
+            self.pnl_subscriptions[account] = pnl
+            print(f"DEBUG: Subscribed to P&L for account {account}")
+            return pnl
+        except Exception as e:
+            print(f"Error subscribing to P&L for {account}: {e}")
+            return None
 
     def get_positions(self) -> List[dict]:
         if not self.connected:
@@ -281,10 +304,11 @@ class IBClient:
                     })
             
             # Extract Account Summary per Account
-            # Use accountSummary (matches TWS Account Summary tab) and cache the latest values
+            # NetLiquidation comes from accountSummary, P&L comes from reqPnL
             accounts_summary = {}
             account_summary_values = list(self.ib.wrapper.acctSummary.values())
 
+            # First pass: extract NetLiquidation from account summary
             if account_summary_values:
                 for val in account_summary_values:
                     if val.currency not in ('USD', 'BASE'):
@@ -302,13 +326,17 @@ class IBClient:
 
                     if val.tag == 'NetLiquidation':
                         accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
-                    elif val.tag == 'UnrealizedPnL':
-                        accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
-                    elif val.tag == 'RealizedPnL':
-                        accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
-                    elif val.tag == 'DayPnL' or val.tag == 'DailyPnL':
-                        accounts_summary[acc_id]["daily_pnl"] = self._safe_float(val.value)
 
+            # Second pass: get P&L from reqPnL subscriptions (the CORRECT source)
+            for acc_id in list(accounts_summary.keys()):
+                pnl_obj = self._ensure_pnl_subscription(acc_id)
+                if pnl_obj:
+                    accounts_summary[acc_id]["daily_pnl"] = self._safe_float(pnl_obj.dailyPnL)
+                    accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(pnl_obj.unrealizedPnL)
+                    accounts_summary[acc_id]["realized_pnl"] = self._safe_float(pnl_obj.realizedPnL)
+                    print(f"DEBUG: P&L for {acc_id}: daily={pnl_obj.dailyPnL}, unrealized={pnl_obj.unrealizedPnL}, realized={pnl_obj.realizedPnL}")
+
+            if accounts_summary:
                 self.account_summary_cache = dict(accounts_summary)
             elif self.account_summary_cache:
                 accounts_summary = dict(self.account_summary_cache)
@@ -347,6 +375,13 @@ class IBClient:
                     self._account_summary_started = False
             except Exception as e:
                 print(f"Error canceling account summary: {e}")
+            # Cancel P&L subscriptions
+            for account, pnl in list(self.pnl_subscriptions.items()):
+                try:
+                    self.ib.cancelPnL(account, '')
+                except Exception as e:
+                    print(f"Error canceling P&L for {account}: {e}")
+            self.pnl_subscriptions.clear()
             self.ib.disconnect()
 
 ib_client = IBClient()
