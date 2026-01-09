@@ -103,14 +103,23 @@ class IBClient:
     def _ensure_market_data(self, contract):
         """Subscribes to market data if not already subscribed."""
         if contract.conId not in self.subscribed_contracts:
-            # Generic ticks: 221=Mark Price (good for offline/charts)
-            self.ib.reqMktData(contract, '221', False, False)
+            # Generic ticks: 104=Historical Vol, 106=Implied Vol, 221=Mark Price
+            # These help populate greeks and pricing data
+            self.ib.reqMktData(contract, '104,106,221', False, False)
             self.subscribed_contracts.add(contract.conId)
-            # Also subscribe to underlying for options to get 'underlying_price'
-            # Note: For simplicity, we rely on option greeks to give underlying price often, or request separately
+            # Give the event loop time to receive initial data
+            self.ib.sleep(0.3)
+            
+            # Also subscribe to underlying for options to ensure we have underlying_price
             if contract.secType == 'OPT':
-                # We could request the underlying contract too, but let's see if option market data is enough first
-                pass
+                if contract.symbol not in self.subscribed_symbols:
+                    try:
+                        u_contract = Stock(contract.symbol, 'SMART', 'USD')
+                        self.ib.reqMktData(u_contract, '221', False, False)
+                        self.subscribed_symbols.add(contract.symbol)
+                        self.ib.sleep(0.2)
+                    except:
+                        pass
 
     def _ensure_account_summary(self):
         if not self.ib.isConnected():
@@ -277,7 +286,6 @@ class IBClient:
                     # PnL from portfolio is often delayed/static compared to live calc
                     # but let's prefer portfolio PnL if available as it matches account window
                     pnl = 0.0
-                    pnl = 0.0
                     found_in_portfolio = False
                     for item in portfolio:
                         # Match by conId AND Account
@@ -293,6 +301,14 @@ class IBClient:
                          # Using 100 as multiplier for standard US options.
                          pnl = (current_price - self._safe_float(pos.avgCost)) * self._safe_float(pos.position) * 100.0
                     
+                    # IMPORTANT: IBKR returns avgCost as total cost per 100 shares
+                    # e.g., if you paid $5 per contract, avgCost = 500
+                    # Frontend expects per-contract premium, so divide by 100
+                    avg_cost_per_share = self._safe_float(pos.avgCost)
+                    cost_basis_per_contract = avg_cost_per_share / 100.0 if avg_cost_per_share else 0.0
+                    
+                    print(f"DEBUG OPT: {contract.symbol} {contract.right}{contract.strike} exp={expiry_formatted} qty={pos.position} avgCost={pos.avgCost} cost_basis={cost_basis_per_contract} und_price={und_price} strike={contract.strike}")
+                    
                     mapped_positions.append({
                         "ticker": contract.symbol,
                         "account": pos.account,
@@ -300,7 +316,7 @@ class IBClient:
                         "qty": self._safe_float(pos.position),
                         "strike": self._safe_float(contract.strike),
                         "expiry": expiry_formatted,
-                        "cost_basis": self._safe_float(pos.avgCost),
+                        "cost_basis": cost_basis_per_contract,
                         "unrealized_pnl": self._safe_float(pnl),
                         "daily_pnl": pos_daily_pnl,
                         "current_price": current_price,
