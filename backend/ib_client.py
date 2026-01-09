@@ -142,6 +142,15 @@ class IBClient:
             pnl = self.ib.reqPnL(account, '')
             self.pnl_subscriptions[account] = pnl
             print(f"DEBUG: Subscribed to P&L for account {account}")
+            
+            # Wait for P&L data to arrive (with timeout)
+            # The subscription is async - IBKR sends data after a brief delay
+            for _ in range(10):  # Try for up to 2 seconds
+                self.ib.sleep(0.2)
+                if not math.isnan(pnl.dailyPnL) if pnl.dailyPnL is not None else False:
+                    print(f"DEBUG: P&L data received for {account}")
+                    break
+            
             return pnl
         except Exception as e:
             print(f"Error subscribing to P&L for {account}: {e}")
