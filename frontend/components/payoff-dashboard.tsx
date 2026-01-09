@@ -52,6 +52,7 @@ export function PayoffDashboard() {
   // Live Mode State
   const [isLiveMode, setIsLiveMode] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'offline'>('checking');
+  const [ibConnected, setIbConnected] = useState(false);
   
   // Toggles
   const [showStock, setShowStock] = useState(false);
@@ -74,8 +75,10 @@ export function PayoffDashboard() {
       checkBackendHealth().then((health) => {
           if (health && health.status === 'ok') {
               setIsLiveMode(true);
+              setBackendStatus('connected');
+              setIbConnected(health.ib_connected);
+              
               if (health.ib_connected) {
-                  setBackendStatus('connected');
                   // Auto-fetch positions
                   fetchLivePortfolio().then(data => {
                       const pos = data.positions;
@@ -139,8 +142,6 @@ export function PayoffDashboard() {
                       }, 5000);
                       return () => clearInterval(interval);
                   });
-              } else {
-                  setBackendStatus('connected'); // Backend is connected, but TWS might not be
               }
           } else {
               setBackendStatus('offline');
@@ -247,10 +248,26 @@ export function PayoffDashboard() {
   const formatBound = (value: number) =>
     Number.isFinite(value) ? formatCurrency(value) : "∞";
 
+  const summaryUnrealizedPnl = useMemo(() => {
+    if (!accountSummaries || Object.keys(accountSummaries).length === 0) return null;
+    if (selectedAccount !== "All" && accountSummaries[selectedAccount]) {
+      return accountSummaries[selectedAccount].unrealized_pnl;
+    }
+    if (selectedAccount === "All") {
+      return Object.values(accountSummaries).reduce((sum, s) => sum + s.unrealized_pnl, 0);
+    }
+    return null;
+  }, [accountSummaries, selectedAccount]);
 
   const portfolioUnrealizedPnl = useMemo(() => {
+    if (summaryUnrealizedPnl !== null) return summaryUnrealizedPnl;
     return positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-  }, [positions]);
+  }, [positions, summaryUnrealizedPnl]);
+
+  const positionCount = useMemo(() => {
+    if (selectedAccount === "All") return positions.length;
+    return positions.filter(p => p.account === selectedAccount).length;
+  }, [positions, selectedAccount]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -290,9 +307,9 @@ export function PayoffDashboard() {
        )}
 
        {isLiveMode && (
-           <div className={`flex items-center gap-2 p-3 rounded-lg text-sm border ${backendStatus === 'connected' ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
-               <div className={`w-2 h-2 rounded-full animate-pulse ${backendStatus === 'connected' ? 'bg-green-500' : 'bg-yellow-500'}`} />
-               {backendStatus === 'connected' ? "Live Connection to IBKR TWS" : "Backend Connected (Waiting for TWS...)"}
+           <div className={`flex items-center gap-2 p-3 rounded-lg text-sm border ${ibConnected ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
+               <div className={`w-2 h-2 rounded-full animate-pulse ${ibConnected ? 'bg-green-500' : 'bg-yellow-500'}`} />
+               {ibConnected ? "Live Connection to IBKR TWS" : "Backend Connected (Waiting for TWS...)"}
                 <div className="ml-auto flex items-center gap-4">
                    {/* Account Selector */}
                    {accounts.length > 0 && (
@@ -312,7 +329,7 @@ export function PayoffDashboard() {
                        </div>
                    )}
                    <span className="text-xs font-mono opacity-70 border-l border-white/10 pl-4">
-                       {backendStatus === 'connected' ? "CONNECTED" : "Loc: 8000 OK / TWS: --"}
+                       {ibConnected ? "CONNECTED" : "Loc: 8000 OK / TWS: --"}
                    </span>
                 </div>
            </div>
@@ -375,12 +392,14 @@ export function PayoffDashboard() {
 
         <Card className="bg-slate-900 border-white/10 shadow-lg">
           <CardContent className="pt-6">
-            <div className="text-sm font-medium text-gray-400">Total Unrealized P&L</div>
+            <div className="text-sm font-medium text-gray-400">
+              {selectedAccount === "All" ? "Total Unrealized P&L" : "Account Unrealized P&L"}
+            </div>
             <div className={`text-2xl font-bold mt-2 ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatCurrency(portfolioUnrealizedPnl)}
             </div>
             <div className="text-xs text-gray-500 mt-1">
-              across {positions.length} positions
+              across {positionCount} positions
             </div>
           </CardContent>
         </Card>

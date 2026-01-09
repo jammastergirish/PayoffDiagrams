@@ -46,6 +46,22 @@ class IBClient:
         self.subscribed_symbols = set()
         self.subscribed_accounts = set()
         self.account_summary_cache = {} # Cache for live account summary data
+        self._account_summary_req_id = 9001
+        self._account_summary_group = "All"
+        self._account_summary_tags = (
+            "AccountType,NetLiquidation,TotalCashValue,SettledCash,AccruedCash,"
+            "BuyingPower,EquityWithLoanValue,PreviousDayEquityWithLoanValue,"
+            "GrossPositionValue,RegTEquity,RegTMargin,SMA,InitMarginReq,"
+            "MaintMarginReq,AvailableFunds,ExcessLiquidity,Cushion,"
+            "FullInitMarginReq,FullMaintMarginReq,FullAvailableFunds,"
+            "FullExcessLiquidity,LookAheadNextChange,LookAheadInitMarginReq,"
+            "LookAheadMaintMarginReq,LookAheadAvailableFunds,"
+            "LookAheadExcessLiquidity,HighestSeverity,DayTradesRemaining,"
+            "DayTradesRemainingT+1,DayTradesRemainingT+2,DayTradesRemainingT+3,"
+            "DayTradesRemainingT+4,Leverage,$LEDGER:ALL,UnrealizedPnL,"
+            "RealizedPnL,DayPnL"
+        )
+        self._account_summary_started = False
 
     def start_loop(self):
         """Runs the IB event loop in a separate thread."""
@@ -93,11 +109,27 @@ class IBClient:
                 # We could request the underlying contract too, but let's see if option market data is enough first
                 pass
 
+    def _ensure_account_summary(self):
+        if not self.ib.isConnected():
+            return
+        if self._account_summary_started:
+            return
+        try:
+            self.ib.client.reqAccountSummary(
+                self._account_summary_req_id,
+                self._account_summary_group,
+                self._account_summary_tags
+            )
+            self._account_summary_started = True
+        except Exception as e:
+            print(f"Error requesting account summary: {e}")
+
     def get_positions(self) -> List[dict]:
         if not self.connected:
             return []
         
         try:
+            self._ensure_account_summary()
             positions = self.ib.positions()
             portfolio = self.ib.portfolio()
             print(f"DEBUG: Found {len(positions)} positions from IB")
@@ -249,46 +281,45 @@ class IBClient:
                     })
             
             # Extract Account Summary per Account
-            # Use ib.accountValues() which is populated by reqAccountUpdates
-            # Structure: { "U123": { "net_liquidation": 0.0, ... } }
+            # Use accountSummary (matches TWS Account Summary tab) and cache the latest values
             accounts_summary = {}
+            account_summary_values = list(self.ib.wrapper.acctSummary.values())
 
-            # Fallback to accountValues (populated by reqAccountUpdates)
-            account_values = self.ib.accountValues()
-            
-            if account_values:
-                for val in account_values:
-                    if val.currency == 'USD': 
-                        acc_id = val.account
-                        if acc_id not in accounts_summary:
-                            accounts_summary[acc_id] = {
-                                "net_liquidation": 0.0,
-                                "unrealized_pnl": 0.0,
-                                "realized_pnl": 0.0,
-                                "daily_pnl": 0.0
-                            }
-                            
-                        if val.tag == 'NetLiquidation':
-                            accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
-                        elif val.tag == 'UnrealizedPnL':
-                            accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
-                        elif val.tag == 'RealizedPnL':
-                            accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
-                        elif val.tag == 'DayPnL' or val.tag == 'DailyPnL': # Check for alternative names
-                            accounts_summary[acc_id]["daily_pnl"] = self._safe_float(val.value)
-            
-            # If API daily_pnl is 0 (missing), use our manual aggregation
-            # This handles accounts where 'DailyPnL' tag is not sent
-            for acc_id, summary in accounts_summary.items():
-                if summary['daily_pnl'] == 0.0:
-                    manual_daily_sum = sum(p.get('daily_pnl', 0.0) for p in mapped_positions if p['account'] == acc_id)
-                    # Add realized P&L since manual is just Unrealized Daily Change
-                    # Daily Total = Unrealized Daily Change + Realized Today
-                    summary['daily_pnl'] = manual_daily_sum + summary['realized_pnl']
+            if account_summary_values:
+                for val in account_summary_values:
+                    if val.currency not in ('USD', 'BASE'):
+                        continue
+                    if val.account == 'All':
+                        continue
+                    acc_id = val.account
+                    if acc_id not in accounts_summary:
+                        accounts_summary[acc_id] = {
+                            "net_liquidation": 0.0,
+                            "unrealized_pnl": 0.0,
+                            "realized_pnl": 0.0,
+                            "daily_pnl": 0.0
+                        }
+
+                    if val.tag == 'NetLiquidation':
+                        accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
+                    elif val.tag == 'UnrealizedPnL':
+                        accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(val.value)
+                    elif val.tag == 'RealizedPnL':
+                        accounts_summary[acc_id]["realized_pnl"] = self._safe_float(val.value)
+                    elif val.tag == 'DayPnL' or val.tag == 'DailyPnL':
+                        accounts_summary[acc_id]["daily_pnl"] = self._safe_float(val.value)
+
+                self.account_summary_cache = dict(accounts_summary)
+            elif self.account_summary_cache:
+                accounts_summary = dict(self.account_summary_cache)
 
             # If a position exists for an account that had no summary (unlikely but possible), ensure it exists
             # Also get list of all accounts for the frontend dropdown
-            all_accounts = sorted(list(set([p['account'] for p in mapped_positions] + list(accounts_summary.keys()))))
+            # Filter out 'All' explicitly if it somehow sneaks in
+            raw_accounts = set([p['account'] for p in mapped_positions] + list(accounts_summary.keys()))
+            if 'All' in raw_accounts:
+                raw_accounts.remove('All')
+            all_accounts = sorted(list(raw_accounts))
             
             print(f"DEBUG: Returning {len(mapped_positions)} mapped positions")
 
@@ -310,6 +341,12 @@ class IBClient:
 
     def disconnect(self):
         if self.connected:
+            try:
+                if self._account_summary_started:
+                    self.ib.client.cancelAccountSummary(self._account_summary_req_id)
+                    self._account_summary_started = False
+            except Exception as e:
+                print(f"Error canceling account summary: {e}")
             self.ib.disconnect()
 
 ib_client = IBClient()
