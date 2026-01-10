@@ -1,7 +1,7 @@
 [project]
 name = "payoff-visualizer-backend"
 version = "0.1.0"
-description = "FastAPI backend for Payoff Visualizer with IBKR integration"
+description = "FastAPI backend for TradeCraft with IBKR integration"
 requires-python = ">=3.9"
 dependencies = [
     "fastapi>=0.100.0",

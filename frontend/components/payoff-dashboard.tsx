@@ -2,17 +2,14 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import Papa from "papaparse";
 import { 
   Position, 
   calculatePnl, 
   getBreakevens, 
   calculateMaxRiskReward,
   getPriceRange,
-  parsePositionsFromRows,
   calculateTheoreticalPnl
 } from "@/lib/payoff-utils";
-import { FileUpload } from "@/components/file-upload";
 import { PayoffChart } from "@/components/payoff-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -252,23 +249,7 @@ export function PayoffDashboard() {
       });
   });
 
-  const handleFileSelect = (file: File) => {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const { positions: parsedPositions, prices } = parsePositionsFromRows(
-          results.data as Record<string, unknown>[]
-        );
-        setPositions(parsedPositions);
-        setStockPrices(prices);
-        
-        // Auto select first ticker
-        const tickers = Array.from(new Set(parsedPositions.map(p => p.ticker))).sort();
-        if (tickers.length > 0) setSelectedTicker(tickers[0]);
-      }
-    });
-  };
+
 
   const tickers = useMemo(() => {
     // Filter positions first by Account
@@ -400,40 +381,7 @@ export function PayoffDashboard() {
 
   return (
     <div className="flex flex-col gap-6">
-       {!isLiveMode && !positions.length && (
-           <div className="flex flex-col gap-4">
-             <div className="rounded-xl border border-white/10 bg-slate-950 p-6 text-sm text-gray-300">
-               <h2 className="text-base font-medium text-white flex justify-between">
-                   <span>Interactive Brokers CSV Required</span>
-                   <span className="text-xs font-mono text-gray-500 uppercase tracking-widest border border-gray-800 px-2 py-1 rounded">Offline Mode</span>
-               </h2>
-               <p className="mt-1 text-gray-400">
-                 Export your portfolio from IBKR TWS and upload the CSV here.
-               </p>
-               <p className="mt-2 text-gray-400">
-                 You'll need to split up strategies in TWS:{" "}
-                 <span className="font-mono text-gray-300">
-                   File-&gt;Global Configuration-&gt;Display-&gt;Ticker Row-&gt;Complex (Multi-Leg Positions)-&gt;Hide Complex Positions
-                 </span>
-               </p>
-               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                 <div>
-                   <p className="text-xs uppercase tracking-wider text-gray-500">Required Columns</p>
-                   <p className="mt-1">
-                     Financial Instrument, Position, Last, Cost Basis, Underlying Price
-                   </p>
-                 </div>
-                 <div>
-                   <p className="text-xs uppercase tracking-wider text-gray-500">Recommended Columns</p>
-                   <p className="mt-1">
-                     Delta, Gamma, Theta, Vega, Implied Vol. (IV), Prob. of Profit (POP), Unrealized P&amp;L
-                   </p>
-                 </div>
-               </div>
-             </div>
-             <FileUpload onFileSelect={handleFileSelect} />
-           </div>
-       )}
+
 
        {isLiveMode && (
            <div className={`flex items-center gap-2 p-3 rounded-lg text-sm border ${ibConnected ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
