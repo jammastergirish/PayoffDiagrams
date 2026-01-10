@@ -70,6 +70,7 @@ export function PayoffDashboard() {
   const [chartTimeframe, setChartTimeframe] = useState<string>("1M");
   const [priceChartData, setPriceChartData] = useState<HistoricalBar[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
+  const [priceChartCache, setPriceChartCache] = useState<Record<string, HistoricalBar[]>>({}); // Cache for preloaded data
 
   const targetDate = useMemo(() => {
     const d = new Date();
@@ -84,13 +85,23 @@ export function PayoffDashboard() {
       return;
     }
     
+    // Check cache first for 1M timeframe
+    if (chartTimeframe === "1M" && priceChartCache[selectedTicker]) {
+      setPriceChartData(priceChartCache[selectedTicker]);
+      return;
+    }
+    
     setChartLoading(true);
     fetchHistoricalData(selectedTicker, chartTimeframe)
       .then(data => {
         setPriceChartData(data.bars || []);
+        // Cache 1M data
+        if (chartTimeframe === "1M" && data.bars?.length) {
+          setPriceChartCache(prev => ({ ...prev, [selectedTicker]: data.bars }));
+        }
       })
       .finally(() => setChartLoading(false));
-  }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected]);
+  }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected, priceChartCache]);
 
   // Initial Backend Check
   useState(() => {
@@ -149,7 +160,7 @@ export function PayoffDashboard() {
                           if (updatedData.summary) setAccountSummaries(updatedData.summary);
                           
                           // Update prices again
-                          const updatedPrices: Record<string, number> = {};
+                      const updatedPrices: Record<string, number> = {};
                           updated.forEach(p => {
                               if (p.ticker) {
                                  if (p.position_type === 'stock' && p.current_price) {
@@ -162,6 +173,20 @@ export function PayoffDashboard() {
                           setStockPrices(prev => ({ ...prev, ...updatedPrices }));
                           
                       }, 5000);
+                      
+                      // Preload chart data for all tickers in background
+                      const tickerList = Array.from(new Set(pos.map((p: Position) => p.ticker))).sort() as string[];
+                      tickerList.forEach((ticker, index) => {
+                        // Stagger requests to avoid overwhelming the API
+                        setTimeout(() => {
+                          fetchHistoricalData(ticker, "1M").then(data => {
+                            if (data.bars?.length) {
+                              setPriceChartCache(prev => ({ ...prev, [ticker]: data.bars }));
+                            }
+                          });
+                        }, index * 500); // 500ms delay between each request
+                      });
+                      
                       return () => clearInterval(interval);
                   });
               }
@@ -491,9 +516,16 @@ export function PayoffDashboard() {
                         onClick={() => setSelectedTicker(t)}
                       >
                         <div className="flex items-center justify-between">
-                          <span className={`font-medium ${selectedTicker === t ? "text-orange-500" : "text-white"}`}>
-                            {t}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`font-medium ${selectedTicker === t ? "text-orange-500" : "text-white"}`}>
+                              {t}
+                            </span>
+                            {stockPrices[t] && (
+                              <span className="text-xs text-gray-400 font-mono">
+                                ${stockPrices[t].toFixed(2)}
+                              </span>
+                            )}
+                          </div>
                           <div className="flex gap-1 text-[10px]">
                             {hasStock && <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{pnl.stockQty > 0 ? '+' : ''}{pnl.stockQty}</span>}
                             {hasOptions && <span className="px-1.5 py-0.5 rounded bg-purple-900/50 text-purple-300">{pnl.optionCount} opt</span>}
@@ -526,15 +558,31 @@ export function PayoffDashboard() {
 
             {/* Main Content */}
             <div className="md:col-span-3 flex flex-col gap-6 overflow-y-auto">
+              {/* Ticker Header - visible across all tabs */}
+              <div className="flex items-center gap-4 px-2">
+                <h2 className="text-2xl font-light tracking-wide text-white">{selectedTicker || "Select a Ticker"}</h2>
+                {selectedTicker && currentPrice > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl font-bold text-white">${currentPrice.toFixed(2)}</span>
+                    {perTickerPnl[selectedTicker] && (
+                      <div className={`flex items-center gap-1 text-sm font-medium ${perTickerPnl[selectedTicker].daily >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        <span className="text-xl">{perTickerPnl[selectedTicker].daily >= 0 ? '▲' : '▼'}</span>
+                        <span>{perTickerPnl[selectedTicker].daily >= 0 ? '+' : ''}{formatCurrency(perTickerPnl[selectedTicker].daily)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <Tabs defaultValue="payoff" className="w-full">
                 <TabsList className="bg-slate-900 border border-white/10">
-                  <TabsTrigger value="chart" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Chart</TabsTrigger>
+                  <TabsTrigger value="chart" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Price Chart</TabsTrigger>
+                  <TabsTrigger value="risk" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Positions & Profile</TabsTrigger>
                   <TabsTrigger value="payoff" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Payoff Diagrams</TabsTrigger>
                 </TabsList>
                 <TabsContent value="chart" className="mt-4">
                   <Card className="bg-slate-950 border-white/10 text-white">
-                    <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-white/5">
-                      <CardTitle className="text-xl font-light tracking-wide">{selectedTicker || "Select a Ticker"}</CardTitle>
+                    <CardHeader className="flex flex-row items-center justify-end pb-4 border-b border-white/5">
                       <div className="flex gap-1">
                         {["1H", "1D", "1W", "1M", "1Y"].map(tf => (
                           <Button
@@ -716,46 +764,86 @@ export function PayoffDashboard() {
                        showCombined={showCombined}
                        showT0={showT0}
                     />
-                    
-                    {chartData.stats && (
-                        <div className="grid grid-cols-4 gap-4 mt-8">
-                            <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30">
-                                <p className="text-xs text-green-400 font-medium uppercase tracking-wider">Max Profit</p>
-                                <p className="text-2xl font-light text-green-300 mt-1">
-                                    {formatBound(chartData.stats.maxProfit)}
-                                </p>
-                            </div>
-                            <div className={`p-4 rounded-lg border ${chartData.stats.maxLoss > 0 ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30"}`}>
-                                <p className={`text-xs font-medium uppercase tracking-wider ${chartData.stats.maxLoss > 0 ? "text-green-400" : "text-red-400"}`}>
-                                    {chartData.stats.maxLoss > 0 ? "Guaranteed Profit" : "Max Loss"}
-                                </p>
-                                <p className={`text-2xl font-light mt-1 ${chartData.stats.maxLoss > 0 ? "text-green-300" : "text-red-300"}`}>
-                                    {chartData.stats.maxLoss > 0 
-                                        ? formatBound(chartData.stats.maxLoss)
-                                        : formatBound(-1 * chartData.stats.maxLoss)
-                                    }
-                                </p>
-                            </div>
-                            <div className="p-4 rounded-lg bg-white/5 border border-white/10">
-                                <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Breakevens</p>
-                                <p className="text-2xl font-light text-white mt-1">
-                                    {chartData.breakevens.length > 0 
-                                      ? chartData.breakevens.map(b => `$${b.toFixed(0)}`).join(", ") 
-                                      : "None"}
-                                </p>
-                            </div>
-                            <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
-                                <p className="text-xs text-blue-400 font-medium uppercase tracking-wider">Unrealized P&L</p>
-                                <p className={`text-2xl font-light mt-1 ${totalUnrealizedPnl >= 0 ? "text-blue-300" : "text-red-300"}`}>
-                                    {totalUnrealizedPnl >= 0 ? "+" : ""}${totalUnrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                </p>
-                            </div>
-                        </div>
-                    )}
+                 </CardContent>
+               </Card>
+                </TabsContent>
 
-                    {/* Risk Dashboard */}
-                    <div className="mt-6 pt-6 border-t border-white/5">
-                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Risk Profile (Greeks)</h4>
+                {/* Position & Risk Profile Tab */}
+                <TabsContent value="risk" className="mt-4 space-y-6">
+                  {/* Positions Table */}
+                  <Card className="bg-slate-950 border-white/10 text-white">
+                    <CardHeader><CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Positions for {selectedTicker}</CardTitle></CardHeader>
+                    <CardContent>
+                        <div className="space-y-2">
+                            {activePositions.map((pos, i) => (
+                                <div key={i} className="flex justify-between items-center p-4 bg-white/5 rounded-lg border border-white/5 hover:bg-white/10 transition-colors">
+                                    <div>
+                                        <span className={`font-medium ${pos.position_type === 'call' ? 'text-green-400' : pos.position_type === 'put' ? 'text-red-400' : 'text-blue-400'}`}>
+                                            {pos.qty > 0 ? '+' : ''}{pos.qty} {pos.position_type.toUpperCase()}
+                                        </span>
+                                        {pos.strike && <span className="ml-2 text-gray-300">@ {pos.strike}</span>}
+                                        {pos.expiry && <span className="ml-2 text-xs text-gray-500 border border-white/10 px-2 py-0.5 rounded-full">
+                                            {pos.expiry} <span className="text-gray-400">({pos.dte}d)</span>
+                                        </span>}
+                                        {pos.iv !== undefined && pos.iv > 0 && <span className="ml-2 text-xs text-orange-400 border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 rounded-full">IV {pos.iv.toFixed(1)}%</span>}
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-sm font-mono text-gray-400">
+                                            ${pos.cost_basis?.toFixed(2)}
+                                        </div>
+                                        {pos.unrealized_pnl !== undefined && (
+                                            <div className={`text-xs font-mono font-bold ${pos.unrealized_pnl >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                                                {pos.unrealized_pnl >= 0 ? "+" : ""}{pos.unrealized_pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Max Profit/Loss Cards */}
+                  {chartData.stats && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                            <p className="text-xs text-green-400 font-medium uppercase tracking-wider">Max Profit</p>
+                            <p className="text-2xl font-light text-green-300 mt-1">
+                                {formatBound(chartData.stats.maxProfit)}
+                            </p>
+                        </div>
+                        <div className={`p-4 rounded-lg border ${chartData.stats.maxLoss > 0 ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30"}`}>
+                            <p className={`text-xs font-medium uppercase tracking-wider ${chartData.stats.maxLoss > 0 ? "text-green-400" : "text-red-400"}`}>
+                                {chartData.stats.maxLoss > 0 ? "Guaranteed Profit" : "Max Loss"}
+                            </p>
+                            <p className={`text-2xl font-light mt-1 ${chartData.stats.maxLoss > 0 ? "text-green-300" : "text-red-300"}`}>
+                                {chartData.stats.maxLoss > 0 
+                                    ? formatBound(chartData.stats.maxLoss)
+                                    : formatBound(-1 * chartData.stats.maxLoss)
+                                }
+                            </p>
+                        </div>
+                        <div className="p-4 rounded-lg bg-white/5 border border-white/10">
+                            <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Breakevens</p>
+                            <p className="text-2xl font-light text-white mt-1">
+                                {chartData.breakevens.length > 0 
+                                  ? chartData.breakevens.map(b => `$${b.toFixed(0)}`).join(", ") 
+                                  : "None"}
+                            </p>
+                        </div>
+                        <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                            <p className="text-xs text-blue-400 font-medium uppercase tracking-wider">Unrealized P&L</p>
+                            <p className={`text-2xl font-light mt-1 ${totalUnrealizedPnl >= 0 ? "text-blue-300" : "text-red-300"}`}>
+                                {totalUnrealizedPnl >= 0 ? "+" : ""}${totalUnrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </p>
+                        </div>
+                    </div>
+                  )}
+
+                  {/* Risk Dashboard (Greeks) */}
+                  <Card className="bg-slate-950 border-white/10 text-white">
+                    <CardHeader><CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Risk Profile (Greeks)</CardTitle></CardHeader>
+                    <CardContent>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
                             <p className="text-xs text-orange-400 font-medium uppercase tracking-wider">Net Delta</p>
@@ -778,42 +866,8 @@ export function PayoffDashboard() {
                             <p className="text-[10px] text-gray-500 mt-1">Vol sensitivity</p>
                             </div>
                         </div>
-                    </div>
-                 </CardContent>
-               </Card>
-               
-               {/* Positions Table */}
-               <Card className="bg-slate-950 border-white/10 text-white">
-                  <CardHeader><CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Positions</CardTitle></CardHeader>
-                  <CardContent>
-                      <div className="space-y-2">
-                          {activePositions.map((pos, i) => (
-                              <div key={i} className="flex justify-between items-center p-4 bg-white/5 rounded-lg border border-white/5 hover:bg-white/10 transition-colors">
-                                  <div>
-                                      <span className={`font-medium ${pos.position_type === 'call' ? 'text-green-400' : pos.position_type === 'put' ? 'text-red-400' : 'text-blue-400'}`}>
-                                          {pos.qty > 0 ? '+' : ''}{pos.qty} {pos.position_type.toUpperCase()}
-                                      </span>
-                                      {pos.strike && <span className="ml-2 text-gray-300">@ {pos.strike}</span>}
-                                      {pos.expiry && <span className="ml-2 text-xs text-gray-500 border border-white/10 px-2 py-0.5 rounded-full">
-                                          {pos.expiry} <span className="text-gray-400">({pos.dte}d)</span>
-                                      </span>}
-                                      {pos.iv !== undefined && pos.iv > 0 && <span className="ml-2 text-xs text-orange-400 border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 rounded-full">IV {pos.iv.toFixed(1)}%</span>}
-                                  </div>
-                                  <div className="text-right">
-                                      <div className="text-sm font-mono text-gray-400">
-                                          ${pos.cost_basis?.toFixed(2)}
-                                      </div>
-                                      {pos.unrealized_pnl !== undefined && (
-                                          <div className={`text-xs font-mono font-bold ${pos.unrealized_pnl >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
-                                              {pos.unrealized_pnl >= 0 ? "+" : ""}{pos.unrealized_pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                          </div>
-                                      )}
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  </CardContent>
-               </Card>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
               </Tabs>
             </div>
