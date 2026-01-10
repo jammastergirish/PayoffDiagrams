@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { checkBackendHealth, fetchLivePortfolio } from "@/lib/api-client";
 
@@ -374,7 +375,7 @@ export function PayoffDashboard() {
        {positions.length > 0 && (
          <div className="flex flex-col gap-6">
            {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {accountSummaries && selectedAccount !== 'All' && accountSummaries[selectedAccount] && (
              <>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
@@ -390,6 +391,14 @@ export function PayoffDashboard() {
                     <div className="text-sm font-medium text-gray-400">Today's P&L</div>
                     <div className={`text-2xl font-bold mt-2 ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].daily_pnl)}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-slate-900 border-white/10 shadow-lg">
+                  <CardContent className="pt-6">
+                    <div className="text-sm font-medium text-gray-400">Realized P&L</div>
+                    <div className={`text-2xl font-bold mt-2 ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].realized_pnl)}
                     </div>
                   </CardContent>
                 </Card>
@@ -413,6 +422,14 @@ export function PayoffDashboard() {
                     </div>
                   </CardContent>
                 </Card>
+                <Card className="bg-slate-900 border-white/10 shadow-lg">
+                  <CardContent className="pt-6">
+                    <div className="text-sm font-medium text-gray-400">Total Realized P&L</div>
+                    <div className={`text-2xl font-bold mt-2 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0))}
+                    </div>
+                  </CardContent>
+                </Card>
              </>
         )}
 
@@ -431,13 +448,13 @@ export function PayoffDashboard() {
         </Card>
       </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 flex-1 min-h-0">
             {/* Sidebar */}
-            <Card className="md:col-span-1 h-fit bg-slate-950 border-white/10 text-white">
-               <CardHeader>
+            <Card className="md:col-span-1 bg-slate-950 border-white/10 text-white flex flex-col max-h-[calc(100vh-320px)]">
+               <CardHeader className="flex-shrink-0">
                  <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Tickers</CardTitle>
                </CardHeader>
-               <CardContent className="flex flex-col gap-2">
+               <CardContent className="flex flex-col gap-2 overflow-y-auto flex-1">
                   {tickers.map(t => {
                     const pnl = perTickerPnl[t] || { unrealized: 0, daily: 0, stockQty: 0, optionCount: 0 };
                     const hasStock = pnl.stockQty !== 0;
@@ -487,7 +504,18 @@ export function PayoffDashboard() {
             </Card>
 
             {/* Main Content */}
-            <div className="md:col-span-3 flex flex-col gap-6">
+            <div className="md:col-span-3 flex flex-col gap-6 overflow-y-auto">
+              <Tabs defaultValue="payoff" className="w-full">
+                <TabsList className="bg-slate-900 border border-white/10">
+                  <TabsTrigger value="chart" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Chart</TabsTrigger>
+                  <TabsTrigger value="payoff" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Payoff Diagrams</TabsTrigger>
+                </TabsList>
+                <TabsContent value="chart" className="mt-4">
+                  <Card className="bg-slate-950 border-white/10 text-white p-8">
+                    <div className="text-gray-500 text-center">Chart coming soon</div>
+                  </Card>
+                </TabsContent>
+                <TabsContent value="payoff" className="mt-4 space-y-6">
                <Card className="bg-slate-950 border-white/10 text-white overflow-hidden">
                  <CardHeader className="flex flex-row items-center justify-between pb-6 border-b border-white/5 bg-white/5">
                     <CardTitle className="text-xl font-light tracking-wide">{selectedTicker}</CardTitle>
@@ -685,6 +713,8 @@ export function PayoffDashboard() {
                       </div>
                   </CardContent>
                </Card>
+                </TabsContent>
+              </Tabs>
             </div>
          </div>
           </div>
