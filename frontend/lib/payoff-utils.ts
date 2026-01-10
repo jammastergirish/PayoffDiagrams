@@ -10,6 +10,7 @@ export interface Position {
   expiry?: string;
   dte?: number;
   unrealized_pnl?: number;
+  daily_pnl?: number;
   delta?: number;
   gamma?: number;
   theta?: number;

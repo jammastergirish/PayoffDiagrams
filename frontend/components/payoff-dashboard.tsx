@@ -176,6 +176,32 @@ export function PayoffDashboard() {
     return Array.from(new Set(visible.map(p => p.ticker))).sort();
   }, [positions, selectedAccount]);
 
+  // Per-ticker P&L summary (aggregates stock + options)
+  const perTickerPnl = useMemo(() => {
+    let visible = positions;
+    if (selectedAccount !== 'All') {
+      visible = positions.filter(p => p.account === selectedAccount);
+    }
+    
+    const summary: Record<string, { unrealized: number; daily: number; stockQty: number; optionCount: number }> = {};
+    
+    for (const p of visible) {
+      if (!summary[p.ticker]) {
+        summary[p.ticker] = { unrealized: 0, daily: 0, stockQty: 0, optionCount: 0 };
+      }
+      summary[p.ticker].unrealized += p.unrealized_pnl || 0;
+      summary[p.ticker].daily += p.daily_pnl || 0;
+      
+      if (p.position_type === 'stock') {
+        summary[p.ticker].stockQty += p.qty;
+      } else {
+        summary[p.ticker].optionCount += 1;
+      }
+    }
+    
+    return summary;
+  }, [positions, selectedAccount]);
+
   const activePositions = useMemo(() => {
     // If no ticker selected, return empty
     if (!selectedTicker) return [];
@@ -412,16 +438,46 @@ export function PayoffDashboard() {
                  <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Tickers</CardTitle>
                </CardHeader>
                <CardContent className="flex flex-col gap-2">
-                  {tickers.map(t => (
-                    <Button 
-                      key={t} 
-                      variant="ghost"
-                      className={`justify-start w-full text-sm ${selectedTicker === t ? "bg-orange-500/20 text-orange-500 hover:bg-orange-500/30 hover:text-orange-400" : "text-gray-400 hover:text-white hover:bg-white/5"}`}
-                      onClick={() => setSelectedTicker(t)}
-                    >
-                      {t}
-                    </Button>
-                  ))}
+                  {tickers.map(t => {
+                    const pnl = perTickerPnl[t] || { unrealized: 0, daily: 0, stockQty: 0, optionCount: 0 };
+                    const hasStock = pnl.stockQty !== 0;
+                    const hasOptions = pnl.optionCount > 0;
+                    return (
+                      <div 
+                        key={t} 
+                        className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                          selectedTicker === t 
+                            ? "bg-orange-500/20 border border-orange-500/50" 
+                            : "bg-white/5 border border-transparent hover:bg-white/10"
+                        }`}
+                        onClick={() => setSelectedTicker(t)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`font-medium ${selectedTicker === t ? "text-orange-500" : "text-white"}`}>
+                            {t}
+                          </span>
+                          <div className="flex gap-1 text-[10px]">
+                            {hasStock && <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{pnl.stockQty > 0 ? '+' : ''}{pnl.stockQty}</span>}
+                            {hasOptions && <span className="px-1.5 py-0.5 rounded bg-purple-900/50 text-purple-300">{pnl.optionCount} opt</span>}
+                          </div>
+                        </div>
+                        <div className="flex justify-between mt-2 text-xs">
+                          <div>
+                            <div className="text-gray-500">Unrealized</div>
+                            <div className={pnl.unrealized >= 0 ? "text-green-400" : "text-red-400"}>
+                              {pnl.unrealized >= 0 ? '+' : ''}{formatCurrency(pnl.unrealized)}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-gray-500">Today</div>
+                            <div className={pnl.daily >= 0 ? "text-green-400" : "text-red-400"}>
+                              {pnl.daily >= 0 ? '+' : ''}{formatCurrency(pnl.daily)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                   
                   <div className="my-2 border-b border-white/10" />
                   <Button variant="ghost" onClick={() => setPositions([])} className="w-full text-red-500 hover:text-red-400 hover:bg-red-500/10">
