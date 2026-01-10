@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Papa from "papaparse";
 import { 
   Position, 
@@ -21,7 +21,8 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar } from "@/lib/api-client";
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 
 import {
   Select,
@@ -65,11 +66,31 @@ export function PayoffDashboard() {
   const [ivAdjustment, setIvAdjustment] = useState(0); // 0 = 0% change
   const [daysOffset, setDaysOffset] = useState(0); // 0 to 90 days
 
+  // Stock Chart State
+  const [chartTimeframe, setChartTimeframe] = useState<string>("1M");
+  const [priceChartData, setPriceChartData] = useState<HistoricalBar[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+
   const targetDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() + daysOffset);
     return d;
   }, [daysOffset]);
+
+  // Fetch historical data when ticker or timeframe changes
+  useEffect(() => {
+    if (!selectedTicker || !isLiveMode || !ibConnected) {
+      setPriceChartData([]);
+      return;
+    }
+    
+    setChartLoading(true);
+    fetchHistoricalData(selectedTicker, chartTimeframe)
+      .then(data => {
+        setPriceChartData(data.bars || []);
+      })
+      .finally(() => setChartLoading(false));
+  }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected]);
 
   // Initial Backend Check
   useState(() => {
@@ -511,8 +532,88 @@ export function PayoffDashboard() {
                   <TabsTrigger value="payoff" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Payoff Diagrams</TabsTrigger>
                 </TabsList>
                 <TabsContent value="chart" className="mt-4">
-                  <Card className="bg-slate-950 border-white/10 text-white p-8">
-                    <div className="text-gray-500 text-center">Chart coming soon</div>
+                  <Card className="bg-slate-950 border-white/10 text-white">
+                    <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-white/5">
+                      <CardTitle className="text-xl font-light tracking-wide">{selectedTicker || "Select a Ticker"}</CardTitle>
+                      <div className="flex gap-1">
+                        {["1H", "1D", "1W", "1M", "1Y"].map(tf => (
+                          <Button
+                            key={tf}
+                            variant={chartTimeframe === tf ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => setChartTimeframe(tf)}
+                            className={chartTimeframe === tf 
+                              ? "bg-orange-500 hover:bg-orange-600 text-white" 
+                              : "text-gray-400 hover:text-white hover:bg-white/10"}
+                          >
+                            {tf}
+                          </Button>
+                        ))}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-6">
+                      {chartLoading && (
+                        <div className="flex items-center justify-center h-[400px] text-gray-500">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+                        </div>
+                      )}
+                      {!chartLoading && priceChartData.length === 0 && (
+                        <div className="flex items-center justify-center h-[400px] text-gray-500">
+                          {selectedTicker ? "No chart data available" : "Select a ticker to view chart"}
+                        </div>
+                      )}
+                      {!chartLoading && priceChartData.length > 0 && (
+                        <ResponsiveContainer width="100%" height={400}>
+                          <LineChart data={priceChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                            <XAxis 
+                              dataKey="date" 
+                              stroke="#4b5563" 
+                              tick={{ fill: '#6b7280', fontSize: 10 }}
+                              tickFormatter={(val) => {
+                                if (chartTimeframe === "1H" || chartTimeframe === "1D") {
+                                  return val.split("T")[1]?.substring(0, 5) || val.substring(11, 16);
+                                }
+                                return val.substring(5, 10);
+                              }}
+                              interval="preserveStartEnd"
+                            />
+                            <YAxis 
+                              stroke="#4b5563" 
+                              tick={{ fill: '#6b7280', fontSize: 10 }}
+                              domain={['auto', 'auto']}
+                              tickFormatter={(val) => `$${val.toFixed(0)}`}
+                              width={50}
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: '#1e293b', 
+                                border: '1px solid rgba(255,255,255,0.1)', 
+                                borderRadius: '8px',
+                                color: '#fff'
+                              }}
+                              labelFormatter={(label) => `Date: ${label}`}
+                              formatter={(value) => value !== undefined ? [`$${Number(value).toFixed(2)}`, 'Close'] : ['--', 'Close']}
+                            />
+                            {currentPrice > 0 && (
+                              <ReferenceLine 
+                                y={currentPrice} 
+                                stroke="#f97316" 
+                                strokeDasharray="3 3" 
+                                label={{ value: `$${currentPrice.toFixed(2)}`, fill: '#f97316', fontSize: 10, position: 'right' }}
+                              />
+                            )}
+                            <Line 
+                              type="monotone" 
+                              dataKey="close" 
+                              stroke="#22c55e" 
+                              strokeWidth={1.5}
+                              dot={false}
+                              activeDot={{ r: 4, fill: '#22c55e' }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </CardContent>
                   </Card>
                 </TabsContent>
                 <TabsContent value="payoff" className="mt-4 space-y-6">

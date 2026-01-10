@@ -392,6 +392,64 @@ class IBClient:
                 "summary": {}
             }
 
+    def get_historical_data(self, symbol: str, duration: str, bar_size: str) -> list:
+        """
+        Fetch historical OHLC data for a given symbol.
+        
+        Args:
+            symbol: Stock ticker symbol (e.g., "AAPL")
+            duration: Time span, e.g., "1 Y", "1 M", "1 W", "1 D", "3600 S"
+            bar_size: Bar size, e.g., "1 day", "1 hour", "5 mins", "1 min"
+            
+        Returns:
+            List of dicts with date, open, high, low, close, volume
+        """
+        if not self.connected or not self.ib.isConnected():
+            return []
+        
+        try:
+            # Create a Stock contract
+            contract = Stock(symbol, 'SMART', 'USD')
+            
+            # Request historical data
+            # whatToShow: TRADES, MIDPOINT, BID, ASK, etc.
+            # useRTH: True = regular trading hours only
+            bars = self.ib.reqHistoricalData(
+                contract,
+                endDateTime='',  # Empty string for current time
+                durationStr=duration,
+                barSizeSetting=bar_size,
+                whatToShow='TRADES',
+                useRTH=True,
+                formatDate=1
+            )
+            
+            if not bars:
+                print(f"DEBUG: No historical data returned for {symbol}")
+                return []
+            
+            print(f"DEBUG: Retrieved {len(bars)} bars for {symbol}")
+            
+            # Convert BarData objects to dicts
+            result = []
+            for bar in bars:
+                result.append({
+                    "date": bar.date.isoformat() if hasattr(bar.date, 'isoformat') else str(bar.date),
+                    "open": float(bar.open),
+                    "high": float(bar.high),
+                    "low": float(bar.low),
+                    "close": float(bar.close),
+                    "volume": int(bar.volume) if bar.volume else 0
+                })
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error fetching historical data for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
     def disconnect(self):
         if self.connected:
             try:

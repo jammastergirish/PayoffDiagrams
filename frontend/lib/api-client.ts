@@ -52,3 +52,27 @@ export async function fetchLivePortfolio(): Promise<{
         return { accounts: [], positions: [], summary: {} };
     }
 }
+
+export interface HistoricalBar {
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+}
+
+export async function fetchHistoricalData(
+    symbol: string, 
+    timeframe: string = "1M"
+): Promise<{ symbol: string; timeframe: string; bars: HistoricalBar[] }> {
+    try {
+        const res = await fetch(`${API_BASE}/api/historical/${symbol}?timeframe=${timeframe}`);
+        if (!res.ok) throw new Error("Failed to fetch historical data");
+        return await res.json();
+    } catch (e) {
+        console.error(e);
+        return { symbol, timeframe, bars: [] };
+    }
+}
+
