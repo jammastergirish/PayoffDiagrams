@@ -81,3 +81,60 @@ def get_historical_data(symbol: str, timeframe: str = "1M"):
     
     return {"symbol": symbol.upper(), "timeframe": timeframe, "bars": bars}
 
+
+# =====================
+# News API Endpoints
+# =====================
+
+@app.get("/api/news/providers")
+def get_news_providers():
+    """Get available news providers."""
+    if not ib_client.ib.isConnected():
+        return {"error": "Not connected to IBKR", "providers": []}
+    
+    providers = ib_client.get_news_providers()
+    return {"providers": providers}
+
+
+@app.get("/api/news/{symbol}")
+def get_news_headlines(symbol: str, limit: int = 10):
+    """
+    Get news headlines for a symbol.
+    
+    Args:
+        symbol: Stock ticker (e.g., AAPL)
+        limit: Max number of headlines (1-50, default 10)
+    """
+    if not ib_client.ib.isConnected():
+        return {"error": "Not connected to IBKR", "headlines": []}
+    
+    # Clamp limit to reasonable range
+    limit = max(1, min(limit, 50))
+    
+    headlines = ib_client.get_historical_news(
+        symbol=symbol.upper(),
+        total_results=limit
+    )
+    
+    return {"symbol": symbol.upper(), "headlines": headlines}
+
+
+@app.get("/api/news/article/{provider_code}/{article_id:path}")
+def get_news_article(provider_code: str, article_id: str):
+    """
+    Get full article content.
+    
+    Args:
+        provider_code: News provider code (e.g., BZ, FLY)
+        article_id: Article ID from headline
+    """
+    if not ib_client.ib.isConnected():
+        return {"error": "Not connected to IBKR"}
+    
+    article = ib_client.get_news_article(
+        provider_code=provider_code,
+        article_id=article_id
+    )
+    
+    return article
+

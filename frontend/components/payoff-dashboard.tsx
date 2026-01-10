@@ -21,7 +21,8 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline } from "@/lib/api-client";
+import { NewsModal } from "@/components/news-modal";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 
 import {
@@ -72,6 +73,12 @@ export function PayoffDashboard() {
   const [chartLoading, setChartLoading] = useState(false);
   const [priceChartCache, setPriceChartCache] = useState<Record<string, HistoricalBar[]>>({}); // Cache for preloaded data
 
+  // News State
+  const [newsHeadlines, setNewsHeadlines] = useState<NewsHeadline[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string } | null>(null);
+  const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
+
   const targetDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() + daysOffset);
@@ -102,6 +109,55 @@ export function PayoffDashboard() {
       })
       .finally(() => setChartLoading(false));
   }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected, priceChartCache]);
+
+  // Fetch news when ticker changes and poll every 30 seconds
+  useEffect(() => {
+    if (!selectedTicker || !isLiveMode || !ibConnected) {
+      setNewsHeadlines([]);
+      setNewsLoading(false);
+      return;
+    }
+    
+    let isFirstFetch = true;
+    let isMounted = true;
+    
+    const fetchNews = () => {
+      // Only show loading on first fetch for this ticker
+      if (isFirstFetch) {
+        setNewsLoading(true);
+      }
+      
+      fetchNewsHeadlines(selectedTicker, 15)
+        .then(data => {
+          if (isMounted) {
+            setNewsHeadlines(data.headlines || []);
+          }
+        })
+        .catch(err => {
+          console.error("Error fetching news:", err);
+          if (isMounted) {
+            setNewsHeadlines([]);
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setNewsLoading(false);
+            isFirstFetch = false;
+          }
+        });
+    };
+    
+    // Initial fetch
+    fetchNews();
+    
+    // Poll every 30 seconds
+    const interval = setInterval(fetchNews, 30000);
+    
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [selectedTicker, isLiveMode, ibConnected]);
 
   // Initial Backend Check
   useState(() => {
@@ -425,25 +481,25 @@ export function PayoffDashboard() {
         {accountSummaries && selectedAccount !== 'All' && accountSummaries[selectedAccount] && (
              <>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4">
                     <div className="text-sm font-medium text-gray-400">Account Net Liq</div>
-                    <div className="text-2xl font-bold text-white mt-2">
+                    <div className="text-2xl font-bold text-white mt-1">
                       {formatCurrency(accountSummaries[selectedAccount].net_liquidation)}
                     </div>
                   </CardContent>
                 </Card>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4">
                     <div className="text-sm font-medium text-gray-400">Today's P&L</div>
-                    <div className={`text-2xl font-bold mt-2 ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div className={`text-2xl font-bold mt-1 ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].daily_pnl)}
                     </div>
                   </CardContent>
                 </Card>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4">
                     <div className="text-sm font-medium text-gray-400">Realized P&L</div>
-                    <div className={`text-2xl font-bold mt-2 ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div className={`text-2xl font-bold mt-1 ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].realized_pnl)}
                     </div>
                   </CardContent>
@@ -453,25 +509,25 @@ export function PayoffDashboard() {
         {accountSummaries && selectedAccount === 'All' && (
              <>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4">
                     <div className="text-sm font-medium text-gray-400">Total Net Liq</div>
-                    <div className="text-2xl font-bold text-white mt-2">
+                    <div className="text-2xl font-bold text-white mt-1">
                       {formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.net_liquidation, 0))}
                     </div>
                   </CardContent>
                 </Card>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4">
                     <div className="text-sm font-medium text-gray-400">Total Today's P&L</div>
-                    <div className={`text-2xl font-bold mt-2 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div className={`text-2xl font-bold mt-1 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
                     </div>
                   </CardContent>
                 </Card>
                 <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4">
                     <div className="text-sm font-medium text-gray-400">Total Realized P&L</div>
-                    <div className={`text-2xl font-bold mt-2 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div className={`text-2xl font-bold mt-1 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0))}
                     </div>
                   </CardContent>
@@ -480,11 +536,11 @@ export function PayoffDashboard() {
         )}
 
         <Card className="bg-slate-900 border-white/10 shadow-lg">
-          <CardContent className="pt-6">
+          <CardContent className="pt-4">
             <div className="text-sm font-medium text-gray-400">
               {selectedAccount === "All" ? "Total Unrealized P&L" : "Account Unrealized P&L"}
             </div>
-            <div className={`text-2xl font-bold mt-2 ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            <div className={`text-2xl font-bold mt-1 ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatCurrency(portfolioUnrealizedPnl)}
             </div>
             <div className="text-xs text-gray-500 mt-1">
@@ -577,8 +633,9 @@ export function PayoffDashboard() {
               <Tabs defaultValue="payoff" className="w-full">
                 <TabsList className="bg-slate-900 border border-white/10">
                   <TabsTrigger value="chart" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Price Chart</TabsTrigger>
+                  <TabsTrigger value="news" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">News</TabsTrigger>
                   <TabsTrigger value="risk" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Positions & Profile</TabsTrigger>
-                  <TabsTrigger value="payoff" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Payoff Diagrams</TabsTrigger>
+                  <TabsTrigger value="payoff" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Payoff Diagram</TabsTrigger>
                 </TabsList>
                 <TabsContent value="chart" className="mt-4">
                   <Card className="bg-slate-950 border-white/10 text-white">
@@ -664,6 +721,77 @@ export function PayoffDashboard() {
                     </CardContent>
                   </Card>
                 </TabsContent>
+
+                {/* News Tab */}
+                <TabsContent value="news" className="mt-4">
+                  <Card className="bg-slate-950 border-white/10 text-white">
+                    <CardHeader className="pb-2 border-b border-white/5">
+                      <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Latest News for {selectedTicker}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-2">
+                      {newsLoading && (
+                        <div className="flex items-center justify-center py-12">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+                        </div>
+                      )}
+                      {!newsLoading && newsHeadlines.length === 0 && (
+                        <div className="text-gray-500 py-8 text-center">
+                          {selectedTicker ? "No news available for this ticker" : "Select a ticker to view news"}
+                        </div>
+                      )}
+                      {!newsLoading && newsHeadlines.length > 0 && (
+                        <div className="space-y-2">
+                          {newsHeadlines.map((news, idx) => (
+                            <div
+                              key={`${news.articleId}-${idx}`}
+                              className="p-4 bg-white/5 rounded-lg border border-white/5 hover:bg-white/10 hover:border-orange-500/30 transition-colors cursor-pointer group"
+                              onClick={() => {
+                                setSelectedArticle({
+                                  articleId: news.articleId,
+                                  providerCode: news.providerCode,
+                                  headline: news.headline
+                                });
+                                setIsNewsModalOpen(true);
+                              }}
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1">
+                                  <h3 className="text-sm font-medium text-white group-hover:text-orange-400 transition-colors leading-snug">
+                                    {news.headline}
+                                  </h3>
+                                  <div className="flex items-center gap-3 mt-2">
+                                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">
+                                      {news.providerCode}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(news.time).toLocaleString()}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="text-gray-600 group-hover:text-orange-500 transition-colors text-lg">→</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* News Article Modal */}
+                  {selectedArticle && (
+                    <NewsModal
+                      isOpen={isNewsModalOpen}
+                      onClose={() => {
+                        setIsNewsModalOpen(false);
+                        setSelectedArticle(null);
+                      }}
+                      providerCode={selectedArticle.providerCode}
+                      articleId={selectedArticle.articleId}
+                      headline={selectedArticle.headline}
+                    />
+                  )}
+                </TabsContent>
+
                 <TabsContent value="payoff" className="mt-4 space-y-6">
                <Card className="bg-slate-950 border-white/10 text-white overflow-hidden">
                  <CardHeader className="flex flex-row items-center justify-between pb-6 border-b border-white/5 bg-white/5">

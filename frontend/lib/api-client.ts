@@ -76,3 +76,62 @@ export async function fetchHistoricalData(
     }
 }
 
+// =====================
+// News API Types & Functions
+// =====================
+
+export interface NewsHeadline {
+    articleId: string;
+    headline: string;
+    providerCode: string;
+    time: string;
+}
+
+export interface NewsArticle {
+    articleId: string;
+    providerCode: string;
+    text: string;
+    articleType?: string;
+    error?: string;
+}
+
+export async function fetchNewsHeadlines(
+    symbol: string,
+    limit: number = 10
+): Promise<{ symbol: string; headlines: NewsHeadline[] }> {
+    try {
+        // Add timeout to prevent hanging - news API can be slow
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+        
+        const res = await fetch(`${API_BASE}/api/news/${symbol}?limit=${limit}`, {
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) throw new Error("Failed to fetch news");
+        return await res.json();
+    } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+            console.warn(`News request for ${symbol} timed out`);
+        } else {
+            console.error(e);
+        }
+        return { symbol, headlines: [] };
+    }
+}
+
+export async function fetchNewsArticle(
+    providerCode: string,
+    articleId: string
+): Promise<NewsArticle> {
+    try {
+        const res = await fetch(`${API_BASE}/api/news/article/${providerCode}/${encodeURIComponent(articleId)}`);
+        if (!res.ok) throw new Error("Failed to fetch article");
+        return await res.json();
+    } catch (e) {
+        console.error(e);
+        return { articleId, providerCode, text: "", error: "Failed to fetch article" };
+    }
+}
+

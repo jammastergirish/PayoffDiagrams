@@ -450,6 +450,196 @@ class IBClient:
             traceback.print_exc()
             return []
 
+    def get_news_providers(self) -> list:
+        """
+        Get available news providers (cached).
+        
+        Returns:
+            List of dicts with code and name for each provider
+        """
+        if not self.connected or not self.ib.isConnected():
+            return []
+        
+        # Check cache first
+        if hasattr(self, '_providers_cache') and self._providers_cache:
+            return self._providers_cache
+        
+        try:
+            old_timeout = self.ib.RequestTimeout
+            self.ib.RequestTimeout = 5  # 5 second timeout
+            try:
+                providers = self.ib.reqNewsProviders()
+            except asyncio.TimeoutError:
+                print("DEBUG: News providers request timed out")
+                return []
+            finally:
+                self.ib.RequestTimeout = old_timeout
+            
+            result = []
+            for p in providers:
+                result.append({
+                    "code": p.code,
+                    "name": p.name
+                })
+            print(f"DEBUG: Found {len(result)} news providers: {[p['code'] for p in result]}")
+            
+            # Cache the result
+            self._providers_cache = result
+            return result
+        except Exception as e:
+            print(f"Error fetching news providers: {e}")
+            return []
+
+    def get_historical_news(self, symbol: str, provider_codes: str = "", total_results: int = 10) -> list:
+        """
+        Get historical news headlines for a symbol.
+        
+        Args:
+            symbol: Stock ticker symbol (e.g., "AAPL")
+            provider_codes: Plus-separated list of provider codes (e.g., "BZ+FLY")
+                           If empty, will use common default providers
+            total_results: Max number of headlines to return (max 300)
+            
+        Returns:
+            List of dicts with articleId, headline, providerCode, time
+        """
+        if not self.connected or not self.ib.isConnected():
+            return []
+        
+        try:
+            # Check if we have cached conId for this symbol
+            if not hasattr(self, '_conid_cache'):
+                self._conid_cache = {}
+            
+            if symbol in self._conid_cache:
+                con_id = self._conid_cache[symbol]
+            else:
+                # Get the conId for the symbol with timeout
+                contract = Stock(symbol, 'SMART', 'USD')
+                
+                old_timeout = self.ib.RequestTimeout
+                self.ib.RequestTimeout = 5  # 5 second timeout for contract details
+                try:
+                    details = self.ib.reqContractDetails(contract)
+                except asyncio.TimeoutError:
+                    print(f"DEBUG: Contract details request timed out for {symbol}")
+                    return []
+                finally:
+                    self.ib.RequestTimeout = old_timeout
+                
+                if not details:
+                    print(f"DEBUG: No contract found for {symbol}")
+                    return []
+                
+                con_id = details[0].contract.conId
+                self._conid_cache[symbol] = con_id
+                print(f"DEBUG: Cached conId {con_id} for {symbol}")
+            
+            # Use all available providers if none specified
+            if not provider_codes:
+                # Try cached providers first
+                if hasattr(self, '_providers_cache') and self._providers_cache:
+                    provider_codes = "+".join([p["code"] for p in self._providers_cache])
+                else:
+                    # Fallback to common providers - BRFG (Briefing) is usually available
+                    provider_codes = "BRFG"
+            
+            print(f"DEBUG: Requesting news for {symbol} (conId={con_id}) from providers: {provider_codes}")
+            
+            # Set a timeout to prevent indefinite blocking
+            old_timeout = self.ib.RequestTimeout
+            self.ib.RequestTimeout = 10  # 10 second timeout
+            
+            try:
+                # Request historical news
+                headlines = self.ib.reqHistoricalNews(
+                    conId=con_id,
+                    providerCodes=provider_codes,
+                    startDateTime="",  # Empty for recent news
+                    endDateTime="",
+                    totalResults=min(total_results, 300)
+                )
+            except asyncio.TimeoutError:
+                print(f"DEBUG: News request timed out for {symbol}")
+                return []
+            finally:
+                self.ib.RequestTimeout = old_timeout
+            
+            if not headlines:
+                print(f"DEBUG: No news headlines for {symbol}")
+                return []
+            
+            print(f"DEBUG: Found {len(headlines)} headlines for {symbol}")
+            
+            result = []
+            for h in headlines:
+                # Clean up headline - strip IBKR metadata prefix like {A:800015:L:en:K:0.90:C:...}
+                headline_text = h.headline
+                if headline_text.startswith('{') and '}' in headline_text:
+                    # Find the closing brace and take everything after it
+                    headline_text = headline_text[headline_text.index('}') + 1:].strip()
+                
+                result.append({
+                    "articleId": h.articleId,
+                    "headline": headline_text,
+                    "providerCode": h.providerCode,
+                    "time": h.time.isoformat() if hasattr(h.time, 'isoformat') else str(h.time)
+                })
+            
+            # Sort by time descending (newest first)
+            result.sort(key=lambda x: x["time"], reverse=True)
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error fetching news for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    def get_news_article(self, provider_code: str, article_id: str) -> dict:
+        """
+        Get full news article content.
+        
+        Args:
+            provider_code: News provider code (e.g., "BZ")
+            article_id: Article ID from headline
+            
+        Returns:
+            Dict with articleId and text (HTML content)
+        """
+        if not self.connected or not self.ib.isConnected():
+            return {"error": "Not connected"}
+        
+        try:
+            print(f"DEBUG: Fetching article {article_id} from {provider_code}")
+            
+            article = self.ib.reqNewsArticle(
+                providerCode=provider_code,
+                articleId=article_id
+            )
+            
+            if not article:
+                return {"error": "Article not found"}
+            
+            # The article text might be HTML or plain text depending on provider
+            article_text = article.articleText if hasattr(article, 'articleText') else str(article)
+            
+            print(f"DEBUG: Retrieved article, length: {len(article_text)} chars")
+            
+            return {
+                "articleId": article_id,
+                "providerCode": provider_code,
+                "text": article_text,
+                "articleType": article.articleType if hasattr(article, 'articleType') else "text"
+            }
+            
+        except Exception as e:
+            print(f"Error fetching article {article_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"error": str(e)}
+
     def disconnect(self):
         if self.connected:
             try:
