@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails } from "@/lib/api-client";
 import { NewsModal } from "@/components/news-modal";
 import { CandlestickChart } from "@/components/candlestick-chart";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
@@ -155,6 +155,9 @@ export function PayoffDashboard() {
   const [newsLoading, setNewsLoading] = useState(false);
   const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string; body?: string; url?: string } | null>(null);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
+
+  // Ticker Details State (company name, logo)
+  const [tickerDetailsCache, setTickerDetailsCache] = useState<Record<string, TickerDetails>>({});
 
   const startLoadTask = useCallback((key: string) => {
     setLoadTasks(prev => {
@@ -341,6 +344,28 @@ export function PayoffDashboard() {
     };
   }, [selectedTicker, isLiveMode, ibConnected, startLoadTask, completeLoadTask]);
 
+  // Fetch ticker details (company name, logo) when ticker changes
+  useEffect(() => {
+    if (!selectedTicker || !isLiveMode || !ibConnected) return;
+    
+    // Skip if already cached
+    if (tickerDetailsCache[selectedTicker]) return;
+    
+    fetchTickerDetails(selectedTicker)
+      .then(details => {
+        if (details && !details.error) {
+          setTickerDetailsCache(prev => ({
+            ...prev,
+            [selectedTicker]: details
+          }));
+        }
+      })
+      .catch(err => console.error("Failed to fetch ticker details:", err));
+  }, [selectedTicker, isLiveMode, ibConnected, tickerDetailsCache]);
+
+  // Get current ticker's details
+  const currentTickerDetails = selectedTicker ? tickerDetailsCache[selectedTicker] : null;
+
   // Initial Backend Check
   useEffect(() => {
     let isMounted = true;
@@ -454,6 +479,21 @@ export function PayoffDashboard() {
               }
             } finally {
               if (isMounted) completeLoadTask(taskKey);
+            }
+          });
+
+          // Preload ticker details (company logos) for all tickers
+          void runWithConcurrency(tickerList, 5, async ticker => {
+            try {
+              const details = await fetchTickerDetails(ticker);
+              if (isMounted && details && !details.error) {
+                setTickerDetailsCache(prev => ({
+                  ...prev,
+                  [ticker]: details
+                }));
+              }
+            } catch (err) {
+              // Ignore errors for ticker details
             }
           });
         }
@@ -755,6 +795,21 @@ export function PayoffDashboard() {
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
+                            {/* Ticker Logo with placeholder spacer */}
+                            <div className="w-6 h-6 flex-shrink-0 rounded bg-white/10 overflow-hidden">
+                              {tickerDetailsCache[t]?.branding?.icon_url ? (
+                                <img 
+                                  src={tickerDetailsCache[t].branding!.icon_url!}
+                                  alt={t}
+                                  className="w-full h-full object-contain"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0'; }}
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px] font-bold">
+                                  {t.slice(0, 2)}
+                                </div>
+                              )}
+                            </div>
                             <span className={`font-medium ${selectedTicker === t ? "text-orange-500" : "text-white"}`}>
                               {t}
                             </span>
@@ -798,18 +853,34 @@ export function PayoffDashboard() {
             <div className="md:col-span-3 flex flex-col gap-6 overflow-y-auto">
               {/* Ticker Header - visible across all tabs */}
               <div className="flex items-center gap-4 px-2">
-                <h2 className="text-2xl font-light tracking-wide text-white">{selectedTicker || "Select a Ticker"}</h2>
-                {selectedTicker && currentPrice > 0 && (
-                  <div className="flex items-center gap-3">
-                    <span className="text-3xl font-bold text-white">${currentPrice.toFixed(2)}</span>
-                    {perTickerPnl[selectedTicker] && (
-                      <div className={`flex items-center gap-1 text-sm font-medium ${perTickerPnl[selectedTicker].daily >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        <span className="text-xl">{perTickerPnl[selectedTicker].daily >= 0 ? '▲' : '▼'}</span>
-                        <span>{perTickerPnl[selectedTicker].daily >= 0 ? '+' : ''}{formatCurrency(perTickerPnl[selectedTicker].daily)}</span>
-                      </div>
+                {/* Company Logo */}
+                {currentTickerDetails?.branding?.icon_url && (
+                  <img 
+                    src={currentTickerDetails.branding.icon_url}
+                    alt={currentTickerDetails.name || selectedTicker || ''}
+                    className="w-12 h-12 rounded-lg bg-white/10 object-contain p-1"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-2xl font-bold tracking-wide text-white">{selectedTicker || "Select a Ticker"}</h2>
+                    {currentTickerDetails?.name && (
+                      <span className="text-lg text-gray-400 font-light">{currentTickerDetails.name}</span>
                     )}
                   </div>
-                )}
+                  {selectedTicker && currentPrice > 0 && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-3xl font-bold text-white">${currentPrice.toFixed(2)}</span>
+                      {perTickerPnl[selectedTicker] && (
+                        <div className={`flex items-center gap-1 text-sm font-medium ${perTickerPnl[selectedTicker].daily >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <span className="text-xl">{perTickerPnl[selectedTicker].daily >= 0 ? '▲' : '▼'}</span>
+                          <span>{perTickerPnl[selectedTicker].daily >= 0 ? '+' : ''}{formatCurrency(perTickerPnl[selectedTicker].daily)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <Tabs defaultValue="payoff" className="w-full">

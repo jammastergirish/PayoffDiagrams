@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .ib_client import ib_client, PositionModel
-from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article
+from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article, get_ticker_details
 import asyncio
 
 from contextlib import asynccontextmanager
@@ -54,9 +54,10 @@ def get_portfolio():
     return data
 
 # ============================================
-# MASSIVE.COM ENDPOINTS (Historical + News)
+# MASSIVE.COM ENDPOINTS (Historical + News + Company Info)
 # - Historical OHLC bars
 # - Benzinga news headlines and articles
+# - Ticker details (company info, branding)
 # ============================================
 
 @app.get("/api/historical/{symbol}")
@@ -69,6 +70,17 @@ def get_historical_data(symbol: str, timeframe: str = "1M"):
         timeframe: One of 1Y, 1M, 1W, 1D, 1H
     """
     return get_historical_bars(symbol.upper(), timeframe.upper())
+
+
+@app.get("/api/ticker/{symbol}")
+def get_ticker_info(symbol: str):
+    """
+    Get ticker details (company name, description, logo) from Massive.com.
+    
+    Args:
+        symbol: Stock ticker (e.g., AAPL)
+    """
+    return get_ticker_details(symbol.upper())
 
 
 @app.get("/api/news/{symbol}")
@@ -92,3 +104,4 @@ def get_article(article_id: str):
         article_id: The benzinga_id of the article
     """
     return massive_get_article(article_id)
+

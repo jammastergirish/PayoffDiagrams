@@ -139,10 +139,21 @@ def get_ticker_details(symbol: str) -> dict:
     
     try:
         # GET /v3/reference/tickers/{ticker}
-        response = _client.get_ticker_details(ticker=symbol.upper())
+        # The massive SDK returns a TickerDetails object directly (not wrapped in .results)
+        r = _client.get_ticker_details(ticker=symbol.upper())
         
-        if response and hasattr(response, 'results'):
-            r = response.results
+        if r and hasattr(r, 'name'):
+            # Get branding URLs and append API key for authentication
+            logo_url = None
+            icon_url = None
+            if hasattr(r, 'branding') and r.branding:
+                base_logo = getattr(r.branding, 'logo_url', None)
+                base_icon = getattr(r.branding, 'icon_url', None)
+                if base_logo:
+                    logo_url = f"{base_logo}?apiKey={_api_key}"
+                if base_icon:
+                    icon_url = f"{base_icon}?apiKey={_api_key}"
+            
             return {
                 "symbol": symbol.upper(),
                 "name": getattr(r, 'name', None),
@@ -152,9 +163,9 @@ def get_ticker_details(symbol: str) -> dict:
                 "total_employees": getattr(r, 'total_employees', None),
                 "list_date": getattr(r, 'list_date', None),
                 "branding": {
-                    "logo_url": getattr(r.branding, 'logo_url', None) if hasattr(r, 'branding') else None,
-                    "icon_url": getattr(r.branding, 'icon_url', None) if hasattr(r, 'branding') else None,
-                } if hasattr(r, 'branding') else None
+                    "logo_url": logo_url,
+                    "icon_url": icon_url,
+                } if (logo_url or icon_url) else None
             }
         
         return {"symbol": symbol.upper(), "error": "No details found"}

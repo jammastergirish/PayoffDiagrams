@@ -77,6 +77,36 @@ export async function fetchHistoricalData(
 }
 
 // =====================
+// Ticker Details (Company Info, Branding)
+// =====================
+
+export interface TickerDetails {
+    symbol: string;
+    name?: string;
+    description?: string;
+    homepage_url?: string;
+    market_cap?: number;
+    total_employees?: number;
+    list_date?: string;
+    branding?: {
+        logo_url?: string;
+        icon_url?: string;
+    };
+    error?: string;
+}
+
+export async function fetchTickerDetails(symbol: string): Promise<TickerDetails> {
+    try {
+        const res = await fetch(`${API_BASE}/api/ticker/${symbol}`);
+        if (!res.ok) throw new Error("Failed to fetch ticker details");
+        return await res.json();
+    } catch (e) {
+        console.error(e);
+        return { symbol, error: "Failed to fetch details" };
+    }
+}
+
+// =====================
 // News API Types & Functions
 // =====================
 
