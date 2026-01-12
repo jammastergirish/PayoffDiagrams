@@ -484,7 +484,7 @@ export function PayoffDashboard() {
             if (updatedData.accounts) setAccounts(updatedData.accounts);
             if (updatedData.summary) setAccountSummaries(updatedData.summary);
             applyLivePrices(updated);
-          }, 1000);
+          }, 100);
 
           const chartPrefetchTickers = tickerList.filter(t => t !== primaryTicker);
           registerLoadTasks(chartPrefetchTickers.map(t => `chart:${t}:1M`));
