@@ -3,3 +3,6 @@
 .next/
 node_modules/
 .hypothesis
+.env
+.venv/
+__pycache__/

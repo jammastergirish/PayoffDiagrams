@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { 
   Position, 
   calculatePnl, 
@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline } from "@/lib/api-client";
 import { NewsModal } from "@/components/news-modal";
+import { CandlestickChart } from "@/components/candlestick-chart";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 
 import {
@@ -31,15 +32,54 @@ import {
 } from "@/components/ui/select";
 import { AccountSummary } from "@/lib/payoff-utils";
 
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  handler: (item: T) => Promise<void>
+): Promise<void> {
+  if (items.length === 0) return;
+  const queue = [...items];
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (item === undefined) return;
+      await handler(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
 export function PayoffDashboard() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({});
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+
+  const [loadTasks, setLoadTasks] = useState<Record<string, "pending" | "done">>({});
+  const newsCacheRef = useRef<Record<string, NewsHeadline[]>>({});
+  const isMountedRef = useRef(true);
   
   // Account State
   const [accounts, setAccounts] = useState<string[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("All");
   const [accountSummaries, setAccountSummaries] = useState<Record<string, AccountSummary>>({});
+
+  const selectedAccountRef = useRef(selectedAccount);
+  const selectedTickerRef = useRef<string | null>(selectedTicker);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    selectedAccountRef.current = selectedAccount;
+  }, [selectedAccount]);
+
+  useEffect(() => {
+    selectedTickerRef.current = selectedTicker;
+  }, [selectedTicker]);
   
   // Computed summary based on selection
   const activeSummary = useMemo(() => {
@@ -68,7 +108,7 @@ export function PayoffDashboard() {
   const [chartTimeframe, setChartTimeframe] = useState<string>("1M");
   const [priceChartData, setPriceChartData] = useState<HistoricalBar[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
-  const [priceChartCache, setPriceChartCache] = useState<Record<string, HistoricalBar[]>>({}); // Cache for preloaded data
+  const [priceChartCache, setPriceChartCache] = useState<Record<string, Record<string, HistoricalBar[]>>>({}); // Cache for preloaded data
 
   // News State
   const [newsHeadlines, setNewsHeadlines] = useState<NewsHeadline[]>([]);
@@ -76,36 +116,104 @@ export function PayoffDashboard() {
   const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string } | null>(null);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
 
+  const startLoadTask = useCallback((key: string) => {
+    setLoadTasks(prev => {
+      if (prev[key] === "pending") return prev;
+      return { ...prev, [key]: "pending" };
+    });
+  }, []);
+
+  const completeLoadTask = useCallback((key: string) => {
+    setLoadTasks(prev => {
+      if (!prev[key] || prev[key] === "done") return prev;
+      return { ...prev, [key]: "done" };
+    });
+  }, []);
+
+  const registerLoadTasks = useCallback((keys: string[]) => {
+    if (keys.length === 0) return;
+    setLoadTasks(prev => {
+      let changed = false;
+      const next = { ...prev };
+      keys.forEach(key => {
+        if (!next[key]) {
+          next[key] = "pending";
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const { totalLoadTasks, completedLoadTasks, pendingLoadTasks, loadProgress } = useMemo(() => {
+    const total = Object.keys(loadTasks).length;
+    const completed = Object.values(loadTasks).filter(status => status === "done").length;
+    const pending = total - completed;
+    return {
+      totalLoadTasks: total,
+      completedLoadTasks: completed,
+      pendingLoadTasks: pending,
+      loadProgress: total === 0 ? 0 : completed / total,
+    };
+  }, [loadTasks]);
+
   const targetDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() + daysOffset);
     return d;
   }, [daysOffset]);
 
+  const cachedChartBars = selectedTicker ? priceChartCache[selectedTicker]?.[chartTimeframe] : undefined;
+
   // Fetch historical data when ticker or timeframe changes
   useEffect(() => {
+    let isCurrent = true;
+
     if (!selectedTicker || !isLiveMode || !ibConnected) {
       setPriceChartData([]);
-      return;
+      setChartLoading(false);
+      return () => {
+        isCurrent = false;
+      };
     }
     
-    // Check cache first for 1M timeframe
-    if (chartTimeframe === "1M" && priceChartCache[selectedTicker]) {
-      setPriceChartData(priceChartCache[selectedTicker]);
-      return;
+    if (cachedChartBars && cachedChartBars.length > 0) {
+      setPriceChartData(cachedChartBars);
+      setChartLoading(false);
+      return () => {
+        isCurrent = false;
+      };
     }
     
+    const taskKey = `chart:${selectedTicker}:${chartTimeframe}`;
+    startLoadTask(taskKey);
     setChartLoading(true);
     fetchHistoricalData(selectedTicker, chartTimeframe)
       .then(data => {
-        setPriceChartData(data.bars || []);
-        // Cache 1M data
-        if (chartTimeframe === "1M" && data.bars?.length) {
-          setPriceChartCache(prev => ({ ...prev, [selectedTicker]: data.bars }));
+        if (!isMountedRef.current || !isCurrent) return;
+        const bars = data.bars || [];
+        setPriceChartData(bars);
+        if (bars.length > 0) {
+          setPriceChartCache(prev => ({
+            ...prev,
+            [selectedTicker]: {
+              ...(prev[selectedTicker] || {}),
+              [chartTimeframe]: bars,
+            },
+          }));
         }
       })
-      .finally(() => setChartLoading(false));
-  }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected, priceChartCache]);
+      .finally(() => {
+        if (!isMountedRef.current) return;
+        completeLoadTask(taskKey);
+        if (isCurrent) {
+          setChartLoading(false);
+        }
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected, cachedChartBars, startLoadTask, completeLoadTask]);
 
   // Fetch news when ticker changes and poll every 30 seconds
   useEffect(() => {
@@ -115,139 +223,193 @@ export function PayoffDashboard() {
       return;
     }
     
-    let isFirstFetch = true;
-    let isMounted = true;
-    
-    const fetchNews = () => {
-      // Only show loading on first fetch for this ticker
-      if (isFirstFetch) {
-        setNewsLoading(true);
+    let isCurrent = true;
+    const ticker = selectedTicker;
+    const cached = newsCacheRef.current[ticker];
+    const hasCached = Array.isArray(cached);
+
+    if (hasCached) {
+      setNewsHeadlines(cached);
+      setNewsLoading(false);
+    } else {
+      setNewsHeadlines([]);
+      setNewsLoading(true);
+    }
+
+    const fetchNews = (trackLoad: boolean) => {
+      const taskKey = `news:${ticker}`;
+      if (trackLoad) {
+        startLoadTask(taskKey);
       }
-      
-      fetchNewsHeadlines(selectedTicker, 15)
+
+      fetchNewsHeadlines(ticker, 15)
         .then(data => {
-          if (isMounted) {
-            setNewsHeadlines(data.headlines || []);
+          if (!isMountedRef.current || !isCurrent) return;
+          const headlines = data.headlines || [];
+          const existing = newsCacheRef.current[ticker];
+          const hasExistingData = Array.isArray(existing) && existing.length > 0;
+          if (headlines.length > 0 || !hasExistingData) {
+            newsCacheRef.current[ticker] = headlines;
+            setNewsHeadlines(headlines);
           }
         })
         .catch(err => {
           console.error("Error fetching news:", err);
-          if (isMounted) {
+          const hasCacheNow = Array.isArray(newsCacheRef.current[ticker]);
+          if (isMountedRef.current && isCurrent && !hasCacheNow) {
             setNewsHeadlines([]);
           }
         })
         .finally(() => {
-          if (isMounted) {
+          if (trackLoad) {
+            completeLoadTask(taskKey);
+          }
+          if (isMountedRef.current && isCurrent) {
             setNewsLoading(false);
-            isFirstFetch = false;
           }
         });
     };
     
     // Initial fetch
-    fetchNews();
+    fetchNews(!hasCached);
     
     // Poll every 30 seconds
-    const interval = setInterval(fetchNews, 30000);
+    const interval = setInterval(() => fetchNews(false), 30000);
     
     return () => {
-      isMounted = false;
+      isCurrent = false;
       clearInterval(interval);
     };
-  }, [selectedTicker, isLiveMode, ibConnected]);
+  }, [selectedTicker, isLiveMode, ibConnected, startLoadTask, completeLoadTask]);
 
   // Initial Backend Check
-  useState(() => {
-      checkBackendHealth().then((health) => {
-          if (health && health.status === 'ok') {
-              setIsLiveMode(true);
-              setBackendStatus('connected');
-              setIbConnected(health.ib_connected);
-              
-              if (health.ib_connected) {
-                  // Auto-fetch positions
-                  fetchLivePortfolio().then(data => {
-                      const pos = data.positions;
-                      setPositions(pos);
-                      
-                      // Handle Accounts
-                      if (data.accounts && data.accounts.length > 0) {
-                          setAccounts(data.accounts);
-                          // Default to first if not "All" maybe? Or keep All.
-                          // If current selection is invalid, reset to All
-                          if (selectedAccount !== 'All' && !data.accounts.includes(selectedAccount)) {
-                              setSelectedAccount('All');
-                          }
-                      }
-                      
-                      if (data.summary) {
-                          setAccountSummaries(data.summary);
-                      }
-                      
-                      // Extract prices from live data to populate stockPrices map
-                      const livePrices: Record<string, number> = {};
-                      pos.forEach(p => {
-                          if (p.ticker) {
-                             if (p.position_type === 'stock' && p.current_price) {
-                                 livePrices[p.ticker] = p.current_price;
-                             } else if (p.position_type !== 'stock' && p.underlying_price) {
-                                  livePrices[p.ticker] = p.underlying_price;
-                             }
-                          }
-                      });
-                      setStockPrices(prev => ({ ...prev, ...livePrices }));
-                      
-                      // Initial selection if needed
-                      if (pos.length > 0 && !selectedTicker) {
-                           const tickers = Array.from(new Set(pos.map(p => p.ticker))).sort();
-                           if (tickers.length > 0) setSelectedTicker(tickers[0]);
-                      }
+  useEffect(() => {
+    let isMounted = true;
+    let portfolioInterval: ReturnType<typeof setInterval> | null = null;
 
-                      // Setup live polling every 5s
-                      const interval = setInterval(async () => {
-                          const updatedData = await fetchLivePortfolio();
-                          const updated = updatedData.positions;
-                          setPositions(updated);
-                          
-                          if (updatedData.accounts) setAccounts(updatedData.accounts);
-                          if (updatedData.summary) setAccountSummaries(updatedData.summary);
-                          
-                          // Update prices again
-                      const updatedPrices: Record<string, number> = {};
-                          updated.forEach(p => {
-                              if (p.ticker) {
-                                 if (p.position_type === 'stock' && p.current_price) {
-                                     updatedPrices[p.ticker] = p.current_price;
-                                 } else if (p.position_type !== 'stock' && p.underlying_price) {
-                                      updatedPrices[p.ticker] = p.underlying_price;
-                                 }
-                              }
-                          });
-                          setStockPrices(prev => ({ ...prev, ...updatedPrices }));
-                          
-                      }, 5000);
-                      
-                      // Preload chart data for all tickers in background
-                      const tickerList = Array.from(new Set(pos.map((p: Position) => p.ticker))).sort() as string[];
-                      tickerList.forEach((ticker, index) => {
-                        // Stagger requests to avoid overwhelming the API
-                        setTimeout(() => {
-                          fetchHistoricalData(ticker, "1M").then(data => {
-                            if (data.bars?.length) {
-                              setPriceChartCache(prev => ({ ...prev, [ticker]: data.bars }));
-                            }
-                          });
-                        }, index * 500); // 500ms delay between each request
-                      });
-                      
-                      return () => clearInterval(interval);
-                  });
-              }
-          } else {
-              setBackendStatus('offline');
-          }
+    const applyLivePrices = (pos: Position[]) => {
+      const livePrices: Record<string, number> = {};
+      pos.forEach(p => {
+        if (!p.ticker) return;
+        if (p.position_type === "stock" && p.current_price) {
+          livePrices[p.ticker] = p.current_price;
+        } else if (p.position_type !== "stock" && p.underlying_price) {
+          livePrices[p.ticker] = p.underlying_price;
+        }
       });
-  });
+      setStockPrices(prev => ({ ...prev, ...livePrices }));
+    };
+
+    const bootstrap = async () => {
+      startLoadTask("health");
+      let health: Awaited<ReturnType<typeof checkBackendHealth>> | null = null;
+      try {
+        health = await checkBackendHealth();
+      } finally {
+        if (isMounted) completeLoadTask("health");
+      }
+
+      if (!isMounted) return;
+
+      if (health && health.status === "ok") {
+        setIsLiveMode(true);
+        setBackendStatus("connected");
+        setIbConnected(health.ib_connected);
+
+        if (health.ib_connected) {
+          startLoadTask("portfolio");
+          let data: Awaited<ReturnType<typeof fetchLivePortfolio>>;
+          try {
+            data = await fetchLivePortfolio();
+          } finally {
+            if (isMounted) completeLoadTask("portfolio");
+          }
+
+          if (!isMounted) return;
+
+          const pos = data.positions;
+          setPositions(pos);
+
+          if (data.accounts && data.accounts.length > 0) {
+            setAccounts(data.accounts);
+            if (selectedAccountRef.current !== "All" && !data.accounts.includes(selectedAccountRef.current)) {
+              setSelectedAccount("All");
+            }
+          }
+
+          if (data.summary) {
+            setAccountSummaries(data.summary);
+          }
+
+          applyLivePrices(pos);
+
+          const tickerList = Array.from(new Set(pos.map(p => p.ticker).filter(Boolean))) as string[];
+          tickerList.sort();
+
+          let primaryTicker = selectedTickerRef.current;
+          if (!primaryTicker && tickerList.length > 0) {
+            primaryTicker = tickerList[0];
+            setSelectedTicker(primaryTicker);
+          }
+
+          portfolioInterval = setInterval(async () => {
+            const updatedData = await fetchLivePortfolio();
+            if (!isMounted) return;
+            const updated = updatedData.positions;
+            setPositions(updated);
+            if (updatedData.accounts) setAccounts(updatedData.accounts);
+            if (updatedData.summary) setAccountSummaries(updatedData.summary);
+            applyLivePrices(updated);
+          }, 5000);
+
+          const chartPrefetchTickers = tickerList.filter(t => t !== primaryTicker);
+          registerLoadTasks(chartPrefetchTickers.map(t => `chart:${t}:1M`));
+          void runWithConcurrency(chartPrefetchTickers, 3, async ticker => {
+            const taskKey = `chart:${ticker}:1M`;
+            startLoadTask(taskKey);
+            try {
+              const chartData = await fetchHistoricalData(ticker, "1M");
+              if (isMounted && chartData.bars?.length) {
+                setPriceChartCache(prev => ({
+                  ...prev,
+                  [ticker]: {
+                    ...(prev[ticker] || {}),
+                    ["1M"]: chartData.bars,
+                  },
+                }));
+              }
+            } finally {
+              if (isMounted) completeLoadTask(taskKey);
+            }
+          });
+
+          const newsPrefetchTickers = tickerList.filter(t => t !== primaryTicker);
+          registerLoadTasks(newsPrefetchTickers.map(t => `news:${t}`));
+          void runWithConcurrency(newsPrefetchTickers, 2, async ticker => {
+            const taskKey = `news:${ticker}`;
+            startLoadTask(taskKey);
+            try {
+              const newsData = await fetchNewsHeadlines(ticker, 15);
+              if (isMounted) {
+                newsCacheRef.current[ticker] = newsData.headlines || [];
+              }
+            } finally {
+              if (isMounted) completeLoadTask(taskKey);
+            }
+          });
+        }
+      } else {
+        setBackendStatus("offline");
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      isMounted = false;
+      if (portfolioInterval) clearInterval(portfolioInterval);
+    };
+  }, [startLoadTask, completeLoadTask, registerLoadTasks]);
 
 
 
@@ -381,6 +543,19 @@ export function PayoffDashboard() {
 
   return (
     <div className="flex flex-col gap-6">
+      {pendingLoadTasks > 0 && (
+        <div className="rounded-full border border-white/5 bg-white/5 px-2 py-1">
+          <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-400 to-emerald-400 transition-all duration-300 ease-out"
+              style={{ width: `${Math.max(loadProgress, 0.05) * 100}%` }}
+            />
+          </div>
+          <div className="mt-1 text-[10px] uppercase tracking-wider text-gray-500">
+            Loading {completedLoadTasks}/{totalLoadTasks}
+          </div>
+        </div>
+      )}
 
 
        {isLiveMode && (
@@ -616,55 +791,11 @@ export function PayoffDashboard() {
                         </div>
                       )}
                       {!chartLoading && priceChartData.length > 0 && (
-                        <ResponsiveContainer width="100%" height={400}>
-                          <LineChart data={priceChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                            <XAxis 
-                              dataKey="date" 
-                              stroke="#4b5563" 
-                              tick={{ fill: '#6b7280', fontSize: 10 }}
-                              tickFormatter={(val) => {
-                                if (chartTimeframe === "1H" || chartTimeframe === "1D") {
-                                  return val.split("T")[1]?.substring(0, 5) || val.substring(11, 16);
-                                }
-                                return val.substring(5, 10);
-                              }}
-                              interval="preserveStartEnd"
-                            />
-                            <YAxis 
-                              stroke="#4b5563" 
-                              tick={{ fill: '#6b7280', fontSize: 10 }}
-                              domain={['auto', 'auto']}
-                              tickFormatter={(val) => `$${val.toFixed(0)}`}
-                              width={50}
-                            />
-                            <Tooltip 
-                              contentStyle={{ 
-                                backgroundColor: '#1e293b', 
-                                border: '1px solid rgba(255,255,255,0.1)', 
-                                borderRadius: '8px',
-                                color: '#fff'
-                              }}
-                              labelFormatter={(label) => `Date: ${label}`}
-                              formatter={(value) => value !== undefined ? [`$${Number(value).toFixed(2)}`, 'Close'] : ['--', 'Close']}
-                            />
-                            {currentPrice > 0 && (
-                              <ReferenceLine 
-                                y={currentPrice} 
-                                stroke="#f97316" 
-                                strokeDasharray="3 3" 
-                                label={{ value: `$${currentPrice.toFixed(2)}`, fill: '#f97316', fontSize: 10, position: 'right' }}
-                              />
-                            )}
-                            <Line 
-                              type="monotone" 
-                              dataKey="close" 
-                              stroke="#22c55e" 
-                              strokeWidth={1.5}
-                              dot={false}
-                              activeDot={{ r: 4, fill: '#22c55e' }}
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
+                        <CandlestickChart 
+                          data={priceChartData} 
+                          livePrice={currentPrice}
+                          timeframe={chartTimeframe}
+                        />
                       )}
                     </CardContent>
                   </Card>

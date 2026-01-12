@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .ib_client import ib_client, PositionModel
+from .massive_client import get_historical_bars
 import asyncio
 
 from contextlib import asynccontextmanager
@@ -35,6 +36,10 @@ def health():
         "ib_connected": ib_client.ib.isConnected()
     }
 
+# ============================================
+# IBKR ENDPOINTS (Live Data)
+# ============================================
+
 @app.get("/api/portfolio")
 def get_portfolio():
     if not ib_client.ib.isConnected():
@@ -50,36 +55,22 @@ def get_portfolio():
         return {"positions": data}
     return data
 
-# Timeframe presets mapping to IBKR parameters
-TIMEFRAME_PRESETS = {
-    "1Y": {"duration": "1 Y", "bar_size": "1 day"},
-    "1M": {"duration": "1 M", "bar_size": "1 day"},
-    "1W": {"duration": "1 W", "bar_size": "1 hour"},
-    "1D": {"duration": "1 D", "bar_size": "5 mins"},
-    "1H": {"duration": "3600 S", "bar_size": "1 min"},
-}
+# ============================================
+# MASSIVE.COM ENDPOINTS (Historical Data)
+# ============================================
 
 @app.get("/api/historical/{symbol}")
 def get_historical_data(symbol: str, timeframe: str = "1M"):
     """
-    Get historical price data for a symbol.
+    Get historical price data for a symbol from Massive.com.
     
     Args:
         symbol: Stock ticker (e.g., AAPL)
         timeframe: One of 1Y, 1M, 1W, 1D, 1H
+    
+    Returns OHLC bars - much faster than IBKR.
     """
-    if not ib_client.ib.isConnected():
-        return {"error": "Not connected to IBKR", "bars": []}
-    
-    preset = TIMEFRAME_PRESETS.get(timeframe.upper(), TIMEFRAME_PRESETS["1M"])
-    
-    bars = ib_client.get_historical_data(
-        symbol=symbol.upper(),
-        duration=preset["duration"],
-        bar_size=preset["bar_size"]
-    )
-    
-    return {"symbol": symbol.upper(), "timeframe": timeframe, "bars": bars}
+    return get_historical_bars(symbol.upper(), timeframe.upper())
 
 
 # =====================
