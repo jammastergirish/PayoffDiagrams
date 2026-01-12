@@ -166,11 +166,15 @@ def get_ticker_details(symbol: str) -> dict:
 
 def get_news(symbol: str, limit: int = 15) -> dict:
     """
-    Fetch news headlines from Massive.com Benzinga API.
+    Fetch news headlines from multiple Massive.com sources:
+    - Benzinga (list_benzinga_news_v2)
+    - Reference news (list_ticker_news - /v2/reference/news)
+    
+    Results are merged and sorted by datetime DESC.
     
     Args:
         symbol: Stock ticker (e.g., "AAPL")
-        limit: Maximum number of headlines to return (default 15, max 100)
+        limit: Maximum total headlines to return (default 15, max 30)
         
     Returns:
         Dict with symbol and headlines list
@@ -182,60 +186,105 @@ def get_news(symbol: str, limit: int = 15) -> dict:
             "error": "Massive API key not configured"
         }
     
+    # Clamp limit to reasonable range (max 50 total)
+    limit = max(1, min(limit, 50))
+    per_source_limit = 25  # Fetch 25 from each source, then merge and trim to limit
+    
+    all_headlines = []
+    
+    # --- Fetch from Benzinga ---
     try:
-        # Call Massive.com Benzinga News API
-        # The massive package has list_benzinga_news_v2 method
-        # Note: It returns an iterator that paginates - we stop early after getting enough results
-        
-        # Clamp limit to reasonable range
-        limit = max(1, min(limit, 10))
-        
-        # Use the built-in method from the massive package
-        # This returns an iterator, so we collect only what we need and stop
         news_iter = _client.list_benzinga_news_v2(
             tickers=symbol.upper(),
-            limit=limit,
+            limit=per_source_limit,
             sort="published.desc"
         )
         
-        # Collect results - stop early once we have enough
-        headlines = []
         count = 0
         for article in news_iter:
-            if count >= limit:
+            if count >= per_source_limit:
                 break
             count += 1
             
-            # Handle object-style response from the iterator
-            # Include body so frontend can display without separate fetch
-            headlines.append({
+            all_headlines.append({
                 "articleId": str(getattr(article, 'benzinga_id', '')),
                 "headline": getattr(article, 'title', ''),
                 "providerCode": "BZ",
+                "providerName": "Benzinga",
                 "time": getattr(article, 'published', ''),
                 "teaser": getattr(article, 'teaser', ''),
-                "body": getattr(article, 'body', getattr(article, 'teaser', '')),  # Full article body
+                "body": getattr(article, 'body', getattr(article, 'teaser', '')),
                 "url": getattr(article, 'url', ''),
                 "author": getattr(article, 'author', ''),
-                "channels": getattr(article, 'channels', []),
             })
         
-        print(f"DEBUG [Massive]: Retrieved {len(headlines)} news headlines for {symbol}")
-        
-        return {
-            "symbol": symbol.upper(),
-            "headlines": headlines
-        }
+        print(f"DEBUG [Massive]: Retrieved {count} Benzinga headlines for {symbol}")
         
     except Exception as e:
-        print(f"ERROR [Massive]: Failed to fetch news for {symbol}: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "symbol": symbol.upper(),
-            "headlines": [],
-            "error": str(e)
-        }
+        print(f"WARN [Massive]: Failed to fetch Benzinga news for {symbol}: {e}")
+    
+    # --- Fetch from Reference News (/v2/reference/news) ---
+    try:
+        ref_news_iter = _client.list_ticker_news(
+            ticker=symbol.upper(),
+            limit=per_source_limit,
+            order="desc",
+            sort="published_utc"
+        )
+        
+        count = 0
+        for article in ref_news_iter:
+            if count >= per_source_limit:
+                break
+            count += 1
+            
+            # Get publisher info
+            publisher = getattr(article, 'publisher', None)
+            publisher_name = getattr(publisher, 'name', 'News') if publisher else 'News'
+            
+            # Build a short provider code from publisher name (first 2-3 chars)
+            provider_code = ''.join(c for c in publisher_name if c.isalpha())[:3].upper() or "NEWS"
+            
+            all_headlines.append({
+                "articleId": str(getattr(article, 'id', '')),
+                "headline": getattr(article, 'title', ''),
+                "providerCode": provider_code,
+                "providerName": publisher_name,
+                "time": getattr(article, 'published_utc', ''),
+                "teaser": getattr(article, 'description', ''),
+                "body": getattr(article, 'description', ''),  # Reference news has description, not full body
+                "url": getattr(article, 'article_url', ''),
+                "author": getattr(article, 'author', ''),
+            })
+        
+        print(f"DEBUG [Massive]: Retrieved {count} reference news headlines for {symbol}")
+        
+    except Exception as e:
+        print(f"WARN [Massive]: Failed to fetch reference news for {symbol}: {e}")
+    
+    # --- Sort by datetime DESC and limit ---
+    def parse_time(item):
+        time_str = item.get("time", "")
+        try:
+            # Handle various datetime formats
+            if isinstance(time_str, str) and time_str:
+                return time_str
+            return ""
+        except:
+            return ""
+    
+    # Sort by time descending (newest first)
+    all_headlines.sort(key=lambda x: parse_time(x), reverse=True)
+    
+    # Limit total results
+    all_headlines = all_headlines[:limit]
+    
+    print(f"DEBUG [Massive]: Returning {len(all_headlines)} total headlines for {symbol}")
+    
+    return {
+        "symbol": symbol.upper(),
+        "headlines": all_headlines
+    }
 
 
 def get_news_article(article_id: str) -> dict:

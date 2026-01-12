@@ -279,7 +279,7 @@ export function PayoffDashboard() {
         startLoadTask(taskKey);
       }
 
-      fetchNewsHeadlines(ticker, 15)
+      fetchNewsHeadlines(ticker, 25)
         .then(data => {
           if (!isMountedRef.current || !isCurrent) return;
           const headlines = data.headlines || [];
@@ -426,7 +426,7 @@ export function PayoffDashboard() {
             const taskKey = `news:${ticker}`;
             startLoadTask(taskKey);
             try {
-              const newsData = await fetchNewsHeadlines(ticker, 15);
+              const newsData = await fetchNewsHeadlines(ticker, 25);
               if (isMounted) {
                 newsCacheRef.current[ticker] = newsData.headlines || [];
               }
@@ -886,8 +886,8 @@ export function PayoffDashboard() {
                                     {decodeHtmlEntities(news.headline)}
                                   </h3>
                                   <div className="flex items-center gap-3 mt-2">
-                                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">
-                                      {news.providerCode}
+                                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                                      {news.providerName || news.providerCode}
                                     </span>
                                     <span className="text-xs text-gray-500">
                                       {new Date(news.time).toLocaleString()}

@@ -84,6 +84,7 @@ export interface NewsHeadline {
     articleId: string;
     headline: string;
     providerCode: string;
+    providerName?: string;  // Full publisher name (e.g., "Benzinga", "Investing.com")
     time: string;
     teaser?: string;   // Short summary
     body?: string;     // Full article content (from Benzinga)
