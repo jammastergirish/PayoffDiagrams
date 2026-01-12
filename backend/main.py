@@ -56,6 +56,43 @@ def get_portfolio():
         return {"positions": data}
     return data
 
+
+# Trade Order Model
+from typing import Optional, Literal
+
+class TradeOrder(BaseModel):
+    symbol: str
+    action: Literal["BUY", "SELL"]
+    quantity: int
+    order_type: Literal["MARKET", "LIMIT"]
+    limit_price: Optional[float] = None
+
+
+@app.post("/api/trade")
+def place_trade(order: TradeOrder):
+    """
+    Place a stock order through IBKR.
+    
+    Args:
+        order: TradeOrder with symbol, action, quantity, order_type, and optional limit_price
+    
+    Returns:
+        Order result with success status, order_id, and message/error
+    """
+    if not ib_client.ib.isConnected():
+        return {"success": False, "error": "Not connected to IBKR"}
+    
+    result = ib_client.place_order(
+        symbol=order.symbol,
+        action=order.action,
+        quantity=order.quantity,
+        order_type=order.order_type,
+        limit_price=order.limit_price
+    )
+    
+    return result
+
+
 # ============================================
 # MASSIVE.COM ENDPOINTS (Historical + News + Company Info)
 # - Historical OHLC bars

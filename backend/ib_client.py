@@ -2,7 +2,7 @@ import asyncio
 import threading
 from typing import Optional, List, Literal
 from dataclasses import dataclass
-from ib_insync import IB, Stock, Option, util
+from ib_insync import IB, Stock, Option, MarketOrder, LimitOrder, util
 import math
 import nest_asyncio
 
@@ -401,6 +401,72 @@ class IBClient:
     # This module now focuses ONLY on live data from IBKR:
     # - Positions, P&L, Greeks
     # - Real-time market data subscriptions
+
+
+
+    def place_order(self, symbol: str, action: str, quantity: int, order_type: str, limit_price: Optional[float] = None) -> dict:
+        """
+        Place a stock order through IBKR.
+        
+        Args:
+            symbol: Stock ticker (e.g., "AAPL")
+            action: "BUY" or "SELL"
+            quantity: Number of shares (integer)
+            order_type: "MARKET" or "LIMIT"
+            limit_price: Required for LIMIT orders
+            
+        Returns:
+            dict with success status, order_id, and message/error
+        """
+        if not self.connected or not self.ib.isConnected():
+            return {"success": False, "error": "Not connected to IBKR"}
+        
+        # Validate inputs
+        action = action.upper()
+        if action not in ("BUY", "SELL"):
+            return {"success": False, "error": "Action must be BUY or SELL"}
+        
+        order_type = order_type.upper()
+        if order_type not in ("MARKET", "LIMIT"):
+            return {"success": False, "error": "Order type must be MARKET or LIMIT"}
+        
+        if order_type == "LIMIT" and (limit_price is None or limit_price <= 0):
+            return {"success": False, "error": "Limit price required for LIMIT orders"}
+        
+        if quantity <= 0:
+            return {"success": False, "error": "Quantity must be positive"}
+        
+        try:
+            # Create contract - SMART exchange handles routing for US stocks
+            # Don't use qualifyContracts() as it blocks waiting for IB event loop
+            contract = Stock(symbol.upper(), 'SMART', 'USD')
+            
+            # Create order
+            if order_type == "MARKET":
+                order = MarketOrder(action, quantity)
+            else:
+                order = LimitOrder(action, quantity, limit_price)
+            
+            # Place the order - this is non-blocking, returns Trade object immediately
+            trade = self.ib.placeOrder(contract, order)
+            
+            order_id = trade.order.orderId
+            status = trade.orderStatus.status if trade.orderStatus else "Submitted"
+            
+            print(f"DEBUG: Order placed - ID: {order_id}, Status: {status}, Symbol: {symbol}")
+            
+            return {
+                "success": True,
+                "order_id": order_id,
+                "status": status,
+                "message": f"{action} {quantity} {symbol} @ {order_type}" + (f" ${limit_price}" if limit_price else "")
+            }
+            
+        except Exception as e:
+            print(f"Error placing order: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
 
 
     def disconnect(self):

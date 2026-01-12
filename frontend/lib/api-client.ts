@@ -244,3 +244,38 @@ export async function fetchDailySnapshot(symbol: string): Promise<DailySnapshot 
     }
 }
 
+
+// =====================
+// Trade Order API
+// =====================
+
+export interface TradeOrder {
+    symbol: string;
+    action: "BUY" | "SELL";
+    quantity: number;
+    order_type: "MARKET" | "LIMIT";
+    limit_price?: number;
+}
+
+export interface TradeResult {
+    success: boolean;
+    order_id?: number;
+    status?: string;
+    message?: string;
+    error?: string;
+}
+
+export async function placeTrade(order: TradeOrder): Promise<TradeResult> {
+    try {
+        const res = await fetch(`${API_BASE}/api/trade`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(order),
+        });
+        if (!res.ok) throw new Error("Failed to place trade");
+        return await res.json();
+    } catch (e) {
+        console.error(e);
+        return { success: false, error: e instanceof Error ? e.message : "Failed to place trade" };
+    }
+}

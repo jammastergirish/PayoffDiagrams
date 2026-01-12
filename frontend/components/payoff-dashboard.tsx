@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
 import { CandlestickChart } from "@/components/candlestick-chart";
@@ -164,6 +164,14 @@ export function PayoffDashboard() {
   const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
   const [newTickerInput, setNewTickerInput] = useState("");
   const [snapshotCache, setSnapshotCache] = useState<Record<string, DailySnapshot>>({});
+
+  // Trade Form State
+  const [tradeAction, setTradeAction] = useState<"BUY" | "SELL">("BUY");
+  const [tradeQuantity, setTradeQuantity] = useState<number>(1);
+  const [tradeOrderType, setTradeOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [tradeLimitPrice, setTradeLimitPrice] = useState<string>("");
+  const [tradeSubmitting, setTradeSubmitting] = useState(false);
+  const [tradeResult, setTradeResult] = useState<TradeResult | null>(null);
 
   const startLoadTask = useCallback((key: string) => {
     setLoadTasks(prev => {
@@ -1008,6 +1016,7 @@ export function PayoffDashboard() {
                   <TabsTrigger value="news" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">News</TabsTrigger>
                   <TabsTrigger value="risk" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Positions & Profile</TabsTrigger>
                   <TabsTrigger value="payoff" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Payoff Diagram</TabsTrigger>
+                  <TabsTrigger value="trade" className="data-[state=active]:bg-green-500/20 data-[state=active]:text-green-400">Trade Stock</TabsTrigger>
                 </TabsList>
                 <TabsContent value="chart" className="mt-4">
                   <Card className="bg-slate-950 border-white/10 text-white">
@@ -1334,6 +1343,191 @@ export function PayoffDashboard() {
                             <p className="text-[10px] text-gray-500 mt-1">Vol sensitivity</p>
                             </div>
                         </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* Trade Stock Tab */}
+                <TabsContent value="trade" className="mt-4">
+                  <Card className="bg-slate-950 border-white/10 text-white">
+                    <CardHeader className="pb-4 border-b border-white/5">
+                      <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Place Stock Order</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-6">
+                      {!ibConnected ? (
+                        <div className="text-center py-12">
+                          <div className="text-yellow-400 text-lg mb-2">⚠️ IBKR Not Connected</div>
+                          <p className="text-gray-500">Connect to TWS to place trades</p>
+                        </div>
+                      ) : (
+                        <div className="max-w-md mx-auto space-y-6">
+                          {/* Action Toggle */}
+                          <div>
+                            <div className="text-sm text-gray-500 uppercase tracking-wider mb-2">Action</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => setTradeAction("BUY")}
+                                className={`py-3 px-4 rounded-lg font-bold text-lg transition-all ${
+                                  tradeAction === "BUY"
+                                    ? "bg-green-500 text-white shadow-lg shadow-green-500/30"
+                                    : "bg-white/5 text-gray-400 hover:bg-white/10"
+                                }`}
+                              >
+                                BUY
+                              </button>
+                              <button
+                                onClick={() => setTradeAction("SELL")}
+                                className={`py-3 px-4 rounded-lg font-bold text-lg transition-all ${
+                                  tradeAction === "SELL"
+                                    ? "bg-red-500 text-white shadow-lg shadow-red-500/30"
+                                    : "bg-white/5 text-gray-400 hover:bg-white/10"
+                                }`}
+                              >
+                                SELL
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Quantity */}
+                          <div>
+                            <div className="text-sm text-gray-500 uppercase tracking-wider mb-2">Quantity (Shares)</div>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={tradeQuantity}
+                              onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                              className="bg-white/5 border-white/10 text-white text-center text-2xl font-mono h-14"
+                            />
+                          </div>
+
+                          {/* Order Type Toggle */}
+                          <div>
+                            <div className="text-sm text-gray-500 uppercase tracking-wider mb-2">Order Type</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => setTradeOrderType("MARKET")}
+                                className={`py-2 px-4 rounded-lg font-medium transition-all ${
+                                  tradeOrderType === "MARKET"
+                                    ? "bg-orange-500 text-white"
+                                    : "bg-white/5 text-gray-400 hover:bg-white/10"
+                                }`}
+                              >
+                                Market
+                              </button>
+                              <button
+                                onClick={() => setTradeOrderType("LIMIT")}
+                                className={`py-2 px-4 rounded-lg font-medium transition-all ${
+                                  tradeOrderType === "LIMIT"
+                                    ? "bg-orange-500 text-white"
+                                    : "bg-white/5 text-gray-400 hover:bg-white/10"
+                                }`}
+                              >
+                                Limit
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Limit Price (only for LIMIT orders) */}
+                          {tradeOrderType === "LIMIT" && (
+                            <div>
+                              <div className="text-sm text-gray-500 uppercase tracking-wider mb-2">Limit Price</div>
+                              <div className="relative">
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xl">$</span>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  min={0.01}
+                                  value={tradeLimitPrice}
+                                  onChange={(e) => setTradeLimitPrice(e.target.value)}
+                                  placeholder={currentPrice > 0 ? currentPrice.toFixed(2) : "0.00"}
+                                  className="bg-white/5 border-white/10 text-white text-center text-2xl font-mono h-14 pl-10"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Order Summary */}
+                          <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                            <div className="text-sm text-gray-500 uppercase tracking-wider mb-2">Order Summary</div>
+                            <div className={`text-lg font-medium ${
+                              tradeAction === "BUY" ? "text-green-400" : "text-red-400"
+                            }`}>
+                              {tradeAction} {tradeQuantity} {selectedTicker || "---"} @ {tradeOrderType}
+                              {tradeOrderType === "LIMIT" && tradeLimitPrice && ` $${parseFloat(tradeLimitPrice).toFixed(2)}`}
+                            </div>
+                            {tradeOrderType === "MARKET" && currentPrice > 0 && (
+                              <div className="text-sm text-gray-500 mt-1">
+                                Est. Value: ${(tradeQuantity * currentPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              </div>
+                            )}
+                            {tradeOrderType === "LIMIT" && tradeLimitPrice && parseFloat(tradeLimitPrice) > 0 && (
+                              <div className="text-sm text-gray-500 mt-1">
+                                Est. Value: ${(tradeQuantity * parseFloat(tradeLimitPrice)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Submit Button */}
+                          <Button
+                            onClick={async () => {
+                              if (!selectedTicker) return;
+                              setTradeSubmitting(true);
+                              setTradeResult(null);
+                              
+                              const order: TradeOrder = {
+                                symbol: selectedTicker,
+                                action: tradeAction,
+                                quantity: tradeQuantity,
+                                order_type: tradeOrderType,
+                                limit_price: tradeOrderType === "LIMIT" ? parseFloat(tradeLimitPrice) : undefined,
+                              };
+                              
+                              const result = await placeTrade(order);
+                              setTradeResult(result);
+                              setTradeSubmitting(false);
+                            }}
+                            disabled={!selectedTicker || tradeSubmitting || (tradeOrderType === "LIMIT" && (!tradeLimitPrice || parseFloat(tradeLimitPrice) <= 0))}
+                            className={`w-full py-4 text-lg font-bold transition-all ${
+                              tradeAction === "BUY"
+                                ? "bg-green-500 hover:bg-green-600 disabled:bg-green-500/30"
+                                : "bg-red-500 hover:bg-red-600 disabled:bg-red-500/30"
+                            } text-white disabled:text-gray-400`}
+                          >
+                            {tradeSubmitting ? (
+                              <span className="flex items-center justify-center gap-2">
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                                Placing Order...
+                              </span>
+                            ) : (
+                              `${tradeAction} ${selectedTicker || "---"}`
+                            )}
+                          </Button>
+
+                          {/* Trade Result */}
+                          {tradeResult && (
+                            <div className={`p-4 rounded-lg border ${
+                              tradeResult.success
+                                ? "bg-green-500/10 border-green-500/30 text-green-400"
+                                : "bg-red-500/10 border-red-500/30 text-red-400"
+                            }`}>
+                              {tradeResult.success ? (
+                                <div>
+                                  <div className="font-bold">✓ Order Placed Successfully</div>
+                                  <div className="text-sm mt-1 opacity-80">
+                                    Order ID: {tradeResult.order_id} | Status: {tradeResult.status}
+                                  </div>
+                                  <div className="text-sm mt-1 opacity-60">{tradeResult.message}</div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <div className="font-bold">✗ Order Failed</div>
+                                  <div className="text-sm mt-1 opacity-80">{tradeResult.error}</div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
