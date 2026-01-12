@@ -697,79 +697,65 @@ export function PayoffDashboard() {
        )}
 
        {positions.length > 0 && (
-         <div className="flex flex-col gap-6">
-           {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {accountSummaries && selectedAccount !== 'All' && accountSummaries[selectedAccount] && (
-             <>
-                <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-4">
-                    <div className="text-sm font-medium text-gray-400">Account Net Liq</div>
-                    <div className="text-2xl font-bold text-white mt-1">
-                      {formatCurrency(accountSummaries[selectedAccount].net_liquidation)}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-4">
-                    <div className="text-sm font-medium text-gray-400">Today's P&L</div>
-                    <div className={`text-2xl font-bold mt-1 ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].daily_pnl)}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-4">
-                    <div className="text-sm font-medium text-gray-400">Realized P&L</div>
-                    <div className={`text-2xl font-bold mt-1 ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].realized_pnl)}
-                    </div>
-                  </CardContent>
-                </Card>
-             </>
-        )}
-        {accountSummaries && selectedAccount === 'All' && (
-             <>
-                <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-4">
-                    <div className="text-sm font-medium text-gray-400">Total Net Liq</div>
-                    <div className="text-2xl font-bold text-white mt-1">
-                      {formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.net_liquidation, 0))}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-4">
-                    <div className="text-sm font-medium text-gray-400">Total Today's P&L</div>
-                    <div className={`text-2xl font-bold mt-1 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="bg-slate-900 border-white/10 shadow-lg">
-                  <CardContent className="pt-4">
-                    <div className="text-sm font-medium text-gray-400">Total Realized P&L</div>
-                    <div className={`text-2xl font-bold mt-1 ${Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0))}
-                    </div>
-                  </CardContent>
-                </Card>
-             </>
-        )}
-
-        <Card className="bg-slate-900 border-white/10 shadow-lg">
-          <CardContent className="pt-4">
-            <div className="text-sm font-medium text-gray-400">
-              {selectedAccount === "All" ? "Total Unrealized P&L" : "Account Unrealized P&L"}
-            </div>
-            <div className={`text-2xl font-bold mt-1 ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+          <div className="flex flex-col gap-6">
+            {/* Header with TradeCraft + Key Metrics inline */}
+      <div className="flex items-center justify-between border-b border-white/10 pb-4 gap-4 flex-wrap">
+        <h1 className="text-3xl font-extrabold tracking-tight text-white">
+          Trade<span className="text-orange-500">Craft</span>
+        </h1>
+        
+        <div className="flex items-center gap-3 flex-wrap">
+          {accountSummaries && selectedAccount !== 'All' && accountSummaries[selectedAccount] && (
+            <>
+              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Net Liq</div>
+                <div className="text-lg font-bold text-white">
+                  {formatCurrency(accountSummaries[selectedAccount].net_liquidation)}
+                </div>
+              </div>
+              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
+                <div className={`text-lg font-bold ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].daily_pnl)}
+                </div>
+              </div>
+              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
+                <div className={`text-lg font-bold ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].realized_pnl)}
+                </div>
+              </div>
+            </>
+          )}
+          {accountSummaries && selectedAccount === 'All' && (
+            <>
+              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Total Net Liq</div>
+                <div className="text-lg font-bold text-white">
+                  {formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.net_liquidation, 0))}
+                </div>
+              </div>
+              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
+                <div className={`text-lg font-bold ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
+                </div>
+              </div>
+              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
+                <div className={`text-lg font-bold ${Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0))}
+                </div>
+              </div>
+            </>
+          )}
+          <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+            <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Unrealized</div>
+            <div className={`text-lg font-bold ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatCurrency(portfolioUnrealizedPnl)}
             </div>
-            <div className="text-xs text-gray-500 mt-1">
-              across {positionCount} positions
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 flex-1 min-h-0">
