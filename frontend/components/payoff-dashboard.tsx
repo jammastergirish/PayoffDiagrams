@@ -255,6 +255,36 @@ export function PayoffDashboard() {
     return selectedLegs.reduce((sum, leg) => sum + getLegPrice(leg), 0);
   }, [selectedLegs, optionsChain]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Toggle for showing existing positions in payoff chart
+  const [showExistingPositions, setShowExistingPositions] = useState(false);
+
+  // Convert OptionLeg[] to Position[] for payoff calculation
+  const legsToPositions = useCallback((legs: OptionLeg[]): Position[] => {
+    if (!optionsChain) return [];
+    
+    return legs.map(leg => {
+      // Get the quote for pricing
+      const expiryWithDashes = `${leg.expiry.slice(0,4)}-${leg.expiry.slice(4,6)}-${leg.expiry.slice(6,8)}`;
+      const quote = leg.right === "C"
+        ? (optionsChain.calls[leg.expiry]?.[leg.strike] || optionsChain.calls[expiryWithDashes]?.[leg.strike])
+        : (optionsChain.puts[leg.expiry]?.[leg.strike] || optionsChain.puts[expiryWithDashes]?.[leg.strike]);
+      
+      const mid = quote?.mid || quote?.last || 0;
+      // BUY = positive qty, SELL = negative qty
+      const qty = leg.action === "BUY" ? leg.quantity : -leg.quantity;
+      
+      return {
+        ticker: leg.symbol,
+        position_type: leg.right === "C" ? "call" : "put",
+        qty,
+        strike: leg.strike,
+        cost_basis: mid,
+        expiry: expiryWithDashes,
+        underlying_price: optionsChain.underlying_price,
+      } as Position;
+    });
+  }, [optionsChain]);
+
   // Auto-load options chain when switching to options tab or changing ticker
   const loadOptionsChain = useCallback(async (ticker: string) => {
     if (!ticker || optionsChainLoading) return;
@@ -730,6 +760,48 @@ export function PayoffDashboard() {
     }
     return filtered;
   }, [positions, selectedTicker, selectedAccount]);
+
+  // Calculate payoff data for strategy builder chart
+  const strategyPayoffData = useMemo(() => {
+    if (selectedLegs.length === 0 || !optionsChain) {
+      return { data: [], maxProfit: 0, maxLoss: 0, breakevens: [] as number[] };
+    }
+    
+    const strategyPositions = legsToPositions(selectedLegs);
+    const currentPrice = optionsChain.underlying_price || stockPrices[selectedTicker || ""] || 100;
+    const prices = getPriceRange(strategyPositions, currentPrice);
+    
+    // Calculate just the strategy P&L
+    const strategyPnl = calculatePnl(strategyPositions, prices);
+    
+    // Calculate combined P&L (strategy + existing positions) if toggled
+    let combinedPnl: number[] | undefined;
+    if (showExistingPositions && activePositions.length > 0) {
+      const tickerPositions = activePositions.filter(p => p.ticker === selectedTicker);
+      if (tickerPositions.length > 0) {
+        const existingPnl = calculatePnl(tickerPositions, prices);
+        combinedPnl = strategyPnl.map((v, i) => v + existingPnl[i]);
+      }
+    }
+    
+    // Calculate max profit/loss from strategy
+    const stats = calculateMaxRiskReward(strategyPositions);
+    const breakevens = getBreakevens(prices, strategyPnl);
+    
+    const data = prices.map((price, idx) => ({
+      price,
+      strategy: strategyPnl[idx],
+      combined: combinedPnl ? combinedPnl[idx] : undefined,
+    }));
+    
+    return { 
+      data, 
+      maxProfit: stats.maxProfit, 
+      maxLoss: stats.maxLoss, 
+      breakevens,
+      currentPrice 
+    };
+  }, [selectedLegs, optionsChain, showExistingPositions, activePositions, selectedTicker, stockPrices, legsToPositions]);
 
   const chartData = useMemo(() => {
     if (!selectedTicker || activePositions.length === 0) return { data: [], breakevens: [], stats: null };
@@ -1983,6 +2055,105 @@ export function PayoffDashboard() {
                             );
                           })}
                         </div>
+                        
+                        {/* Payoff Chart */}
+                        {strategyPayoffData.data.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-white/10">
+                            {/* Toggle for existing positions */}
+                            {activePositions.filter(p => p.ticker === selectedTicker).length > 0 && (
+                              <div className="flex items-center gap-2 mb-3">
+                                <Switch
+                                  checked={showExistingPositions}
+                                  onCheckedChange={setShowExistingPositions}
+                                  className="data-[state=checked]:bg-orange-600"
+                                />
+                                <Label className="text-xs text-gray-400 cursor-pointer">
+                                  Superimpose on existing {selectedTicker} positions
+                                </Label>
+                              </div>
+                            )}
+                            
+                            {/* Chart */}
+                            <div className="h-48 w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={strategyPayoffData.data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                                  <XAxis 
+                                    dataKey="price" 
+                                    stroke="#6b7280" 
+                                    tick={{ fontSize: 10 }}
+                                    tickFormatter={(v) => `$${v.toFixed(0)}`}
+                                  />
+                                  <YAxis 
+                                    stroke="#6b7280" 
+                                    tick={{ fontSize: 10 }}
+                                    tickFormatter={(v) => `$${v >= 0 ? '' : '-'}${Math.abs(v / 1000).toFixed(1)}k`}
+                                  />
+                                  <ReferenceLine y={0} stroke="#4b5563" strokeDasharray="3 3" />
+                                  <ReferenceLine 
+                                    x={strategyPayoffData.currentPrice} 
+                                    stroke="#a855f7" 
+                                    strokeDasharray="3 3" 
+                                    label={{ value: "Now", position: "top", fill: "#a855f7", fontSize: 10 }}
+                                  />
+                                  <Tooltip 
+                                    contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
+                                    labelFormatter={(v) => `Price: $${Number(v).toFixed(2)}`}
+                                    formatter={(value, name) => [
+                                      `$${(value as number)?.toFixed(0) ?? 0}`,
+                                      name === "strategy" ? "Strategy P&L" : "Combined P&L"
+                                    ]}
+                                  />
+                                  <Line 
+                                    type="monotone" 
+                                    dataKey="strategy" 
+                                    stroke="#a855f7" 
+                                    strokeWidth={2} 
+                                    dot={false}
+                                    name="Strategy"
+                                  />
+                                  {showExistingPositions && (
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="combined" 
+                                      stroke="#f97316" 
+                                      strokeWidth={2} 
+                                      dot={false}
+                                      name="Combined"
+                                    />
+                                  )}
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                            
+                            {/* Max Profit / Max Loss / Breakevens */}
+                            <div className="grid grid-cols-3 gap-2 mt-3">
+                              <div className="p-2 rounded bg-green-500/10 border border-green-500/30 text-center">
+                                <p className="text-[10px] text-green-400 uppercase tracking-wider">Max Profit</p>
+                                <p className="text-sm font-medium text-green-300">
+                                  {Number.isFinite(strategyPayoffData.maxProfit) 
+                                    ? `$${strategyPayoffData.maxProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                    : "∞"}
+                                </p>
+                              </div>
+                              <div className="p-2 rounded bg-red-500/10 border border-red-500/30 text-center">
+                                <p className="text-[10px] text-red-400 uppercase tracking-wider">Max Loss</p>
+                                <p className="text-sm font-medium text-red-300">
+                                  {Number.isFinite(strategyPayoffData.maxLoss)
+                                    ? `$${Math.abs(strategyPayoffData.maxLoss).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                    : "∞"}
+                                </p>
+                              </div>
+                              <div className="p-2 rounded bg-white/5 border border-white/10 text-center">
+                                <p className="text-[10px] text-gray-400 uppercase tracking-wider">Breakeven</p>
+                                <p className="text-sm font-medium text-white">
+                                  {strategyPayoffData.breakevens.length > 0
+                                    ? strategyPayoffData.breakevens.slice(0, 2).map(b => `$${b.toFixed(0)}`).join(", ")
+                                    : "N/A"}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         
                         {/* Net Cost and Submit */}
                         <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between">
