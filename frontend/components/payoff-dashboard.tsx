@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
 import { CandlestickChart } from "@/components/candlestick-chart";
@@ -173,6 +173,34 @@ export function PayoffDashboard() {
   const [tradeLimitPrice, setTradeLimitPrice] = useState<string>("");
   const [tradeSubmitting, setTradeSubmitting] = useState(false);
   const { showToast } = useToast();
+
+  // Options Chain State
+  const [optionsChain, setOptionsChain] = useState<OptionsChain | null>(null);
+  const [optionsChainLoading, setOptionsChainLoading] = useState(false);
+  const [selectedExpiry, setSelectedExpiry] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<string>("payoff");
+
+  // Auto-load options chain when switching to options tab or changing ticker
+  const loadOptionsChain = useCallback(async (ticker: string) => {
+    if (!ticker || optionsChainLoading) return;
+    setOptionsChainLoading(true);
+    const chain = await fetchOptionsChain(ticker);
+    setOptionsChain(chain);
+    if (chain.expirations.length > 0) {
+      setSelectedExpiry(chain.expirations[0]);
+    }
+    setOptionsChainLoading(false);
+  }, [optionsChainLoading]);
+
+  // Clear options chain cache when ticker changes
+  useEffect(() => {
+    setOptionsChain(null);
+    setSelectedExpiry("");
+    // Auto-reload if on options tab
+    if (activeTab === "options" && selectedTicker) {
+      loadOptionsChain(selectedTicker);
+    }
+  }, [selectedTicker]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startLoadTask = useCallback((key: string) => {
     setLoadTasks(prev => {
@@ -1036,13 +1064,20 @@ export function PayoffDashboard() {
                 </div>
               </div>
 
-              <Tabs defaultValue="payoff" className="w-full">
+              <Tabs value={activeTab} onValueChange={(val) => {
+                setActiveTab(val);
+                // Auto-load options when switching to Options tab
+                if (val === "options" && selectedTicker && !optionsChain) {
+                  loadOptionsChain(selectedTicker);
+                }
+              }} className="w-full">
                 <TabsList className="bg-slate-900 border border-white/10">
                   <TabsTrigger value="chart" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Price Chart</TabsTrigger>
                   <TabsTrigger value="news" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">News</TabsTrigger>
                   <TabsTrigger value="risk" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Positions & Profile</TabsTrigger>
                   <TabsTrigger value="payoff" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Payoff Diagram</TabsTrigger>
                   <TabsTrigger value="trade" className="data-[state=active]:bg-green-500/20 data-[state=active]:text-green-400">Trade Stock</TabsTrigger>
+                  <TabsTrigger value="options" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400">Options Chain</TabsTrigger>
                 </TabsList>
                 <TabsContent value="chart" className="mt-4">
                   <Card className="bg-slate-950 border-white/10 text-white">
@@ -1597,6 +1632,175 @@ export function PayoffDashboard() {
                             )}
                           </Button>
                         </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* Options Chain Tab */}
+                <TabsContent value="options" className="mt-4">
+                  <Card className="bg-slate-950 border-white/10 text-white">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-lg text-purple-400">Options Chain</CardTitle>
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            if (!selectedTicker || !ibConnected) return;
+                            setOptionsChainLoading(true);
+                            const chain = await fetchOptionsChain(selectedTicker);
+                            setOptionsChain(chain);
+                            if (chain.expirations.length > 0 && !selectedExpiry) {
+                              setSelectedExpiry(chain.expirations[0]);
+                            }
+                            setOptionsChainLoading(false);
+                          }}
+                          disabled={!selectedTicker || optionsChainLoading}
+                          className="bg-purple-500 hover:bg-purple-600"
+                        >
+                          {optionsChainLoading ? (
+                            <span className="flex items-center gap-2">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                              Loading...
+                            </span>
+                          ) : (
+                            "Load Chain"
+                          )}
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {!selectedTicker && (
+                        <div className="text-center text-gray-500 py-12">Select a ticker to view options chain</div>
+                      )}
+                      
+                      {selectedTicker && !optionsChain && !optionsChainLoading && (
+                        <div className="text-center text-gray-500 py-12">Click "Load Chain" to fetch options data</div>
+                      )}
+                      
+                      {optionsChain && optionsChain.expirations.length > 0 && (
+                        <div className="space-y-4">
+                          {/* Underlying Price */}
+                          <div className="text-sm text-gray-400">
+                            Underlying: <span className="text-white font-medium">${optionsChain.underlying_price.toFixed(2)}</span>
+                          </div>
+                          
+                          {/* Expiration Tabs */}
+                          <div className="flex gap-1 overflow-x-auto pb-2">
+                            {optionsChain.expirations.map(exp => {
+                              // Format expiry date for display (YYYYMMDD -> MMM DD)
+                              const formatted = exp.length === 8 
+                                ? `${exp.slice(4,6)}/${exp.slice(6,8)}`
+                                : exp;
+                              return (
+                                <button
+                                  key={exp}
+                                  onClick={() => setSelectedExpiry(exp)}
+                                  className={`px-3 py-1.5 text-xs rounded-md whitespace-nowrap transition-all ${
+                                    selectedExpiry === exp
+                                      ? "bg-purple-500 text-white"
+                                      : "bg-white/5 text-gray-400 hover:bg-white/10"
+                                  }`}
+                                >
+                                  {formatted}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          
+                          {/* Options Table */}
+                          {selectedExpiry && (optionsChain.calls[selectedExpiry] || optionsChain.puts[selectedExpiry]) && (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="border-b border-white/10">
+                                    <th colSpan={5} className="text-center text-green-400 py-2 border-r border-white/10">CALLS</th>
+                                    <th className="text-center text-white py-2 px-2">Strike</th>
+                                    <th colSpan={5} className="text-center text-red-400 py-2 border-l border-white/10">PUTS</th>
+                                  </tr>
+                                  <tr className="border-b border-white/10 text-gray-500">
+                                    <th className="text-right py-1 px-1">Bid</th>
+                                    <th className="text-right py-1 px-1">Ask</th>
+                                    <th className="text-right py-1 px-1">Last</th>
+                                    <th className="text-right py-1 px-1">Vol</th>
+                                    <th className="text-right py-1 px-1 border-r border-white/10">IV%</th>
+                                    <th className="text-center py-1 px-2"></th>
+                                    <th className="text-right py-1 px-1 border-l border-white/10">Bid</th>
+                                    <th className="text-right py-1 px-1">Ask</th>
+                                    <th className="text-right py-1 px-1">Last</th>
+                                    <th className="text-right py-1 px-1">Vol</th>
+                                    <th className="text-right py-1 px-1">IV%</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {optionsChain.strikes.map(strike => {
+                                    const call = optionsChain.calls[selectedExpiry]?.[strike];
+                                    const put = optionsChain.puts[selectedExpiry]?.[strike];
+                                    const isAtm = Math.abs(strike - optionsChain.underlying_price) < (optionsChain.underlying_price * 0.02);
+                                    const callItm = strike < optionsChain.underlying_price;
+                                    const putItm = strike > optionsChain.underlying_price;
+                                    
+                                    return (
+                                      <tr 
+                                        key={strike} 
+                                        className={`border-b border-white/5 hover:bg-white/5 ${isAtm ? "bg-purple-500/10" : ""}`}
+                                      >
+                                        {/* Call Side */}
+                                        <td className={`text-right py-1 px-1 ${callItm ? "bg-green-500/10" : ""}`}>
+                                          {call?.bid?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 ${callItm ? "bg-green-500/10" : ""}`}>
+                                          {call?.ask?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 ${callItm ? "bg-green-500/10" : ""}`}>
+                                          {call?.last?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 text-gray-500 ${callItm ? "bg-green-500/10" : ""}`}>
+                                          {call?.volume || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 text-gray-500 border-r border-white/10 ${callItm ? "bg-green-500/10" : ""}`}>
+                                          {call?.iv?.toFixed(1) || "-"}
+                                        </td>
+                                        
+                                        {/* Strike */}
+                                        <td className={`text-center py-1 px-2 font-medium ${isAtm ? "text-purple-400" : "text-white"}`}>
+                                          {strike.toFixed(2)}
+                                        </td>
+                                        
+                                        {/* Put Side */}
+                                        <td className={`text-right py-1 px-1 border-l border-white/10 ${putItm ? "bg-red-500/10" : ""}`}>
+                                          {put?.bid?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 ${putItm ? "bg-red-500/10" : ""}`}>
+                                          {put?.ask?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 ${putItm ? "bg-red-500/10" : ""}`}>
+                                          {put?.last?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 text-gray-500 ${putItm ? "bg-red-500/10" : ""}`}>
+                                          {put?.volume || "-"}
+                                        </td>
+                                        <td className={`text-right py-1 px-1 text-gray-500 ${putItm ? "bg-red-500/10" : ""}`}>
+                                          {put?.iv?.toFixed(1) || "-"}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          
+                          {selectedExpiry && !optionsChain.calls[selectedExpiry] && !optionsChain.puts[selectedExpiry] && (
+                            <div className="text-center text-gray-500 py-8">
+                              No data for this expiration. Prices are fetched for nearest 3 expirations only.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {optionsChain && optionsChain.error && (
+                        <div className="text-center text-red-400 py-8">{optionsChain.error}</div>
                       )}
                     </CardContent>
                   </Card>

@@ -469,7 +469,6 @@ class IBClient:
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
-
     def disconnect(self):
         if self.connected:
             try:

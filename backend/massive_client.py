@@ -401,3 +401,236 @@ def get_news_article(article_id: str) -> dict:
     except Exception as e:
         print(f"ERROR [Massive]: Failed to fetch article {article_id}: {e}")
         return {"error": str(e), "articleId": article_id}
+
+
+def get_options_chain(symbol: str, max_strikes: int = 30) -> dict:
+    """
+    Fetch options chain snapshot from Massive.com API.
+    
+    Uses the list_snapshot_options_chain endpoint which returns all options
+    contracts for an underlying with bid/ask/last prices, Greeks, IV, etc.
+    
+    Note: Requires Massive.com Options Starter subscription or higher.
+    
+    Args:
+        symbol: Stock ticker (e.g., "AAPL")
+        max_strikes: Maximum strikes to return (centered around ATM)
+        
+    Returns:
+        Dict with expirations, strikes, calls, puts data
+    """
+    if not _client:
+        return {
+            "symbol": symbol,
+            "underlying_price": 0,
+            "expirations": [],
+            "strikes": [],
+            "calls": {},
+            "puts": {},
+            "error": "Massive API key not configured"
+        }
+    
+    try:
+        # First, get the underlying stock's current price from daily snapshot
+        print(f"DEBUG [Massive]: Fetching options chain for {symbol}...")
+        underlying_snapshot = get_daily_snapshot(symbol.upper())
+        underlying_price = underlying_snapshot.get("current_price", 0.0) if underlying_snapshot else 0.0
+        print(f"DEBUG [Massive]: Underlying price for {symbol}: ${underlying_price:.2f}")
+        
+        # Get the options chain snapshot
+        # This returns an iterator of OptionContractSnapshot objects
+        chain_iter = _client.list_snapshot_options_chain(symbol.upper())
+        
+        # Collect all option contracts
+        all_contracts = []
+        expirations_set = set()
+        strikes_set = set()
+        
+        contract_count = 0
+        for opt in chain_iter:
+            contract_count += 1
+            # Log progress every 500 contracts
+            if contract_count % 500 == 0:
+                print(f"DEBUG [Massive]: Processed {contract_count} contracts...")
+
+            # Extract underlying price from first contract
+            if underlying_price == 0 and hasattr(opt, 'underlying_asset'):
+                ua = opt.underlying_asset
+                if ua and hasattr(ua, 'price'):
+                    underlying_price = float(ua.price) if ua.price else 0.0
+            
+            # Extract contract details
+            details = opt.details if hasattr(opt, 'details') else None
+            if not details:
+                continue
+            
+            # Get expiration and strike
+            expiry = str(details.expiration_date) if hasattr(details, 'expiration_date') else None
+            strike = float(details.strike_price) if hasattr(details, 'strike_price') else None
+            contract_type = str(details.contract_type).upper() if hasattr(details, 'contract_type') else None
+            
+            if not expiry or strike is None or contract_type not in ['CALL', 'PUT', 'C', 'P']:
+                continue
+            
+            expirations_set.add(expiry)
+            strikes_set.add(strike)
+            
+            # Extract day snapshot data (this is where prices are!)
+            day = opt.day if hasattr(opt, 'day') else None
+            
+            # Prices from day snapshot
+            close_price = float(day.close) if day and hasattr(day, 'close') and day.close else 0.0
+            open_price = float(day.open) if day and hasattr(day, 'open') and day.open else 0.0
+            high_price = float(day.high) if day and hasattr(day, 'high') and day.high else 0.0
+            low_price = float(day.low) if day and hasattr(day, 'low') and day.low else 0.0
+            vwap = float(day.vwap) if day and hasattr(day, 'vwap') and day.vwap else 0.0
+            volume = int(day.volume) if day and hasattr(day, 'volume') and day.volume else 0
+            
+            # Use close price as "last", and approximate bid/ask from high/low
+            last = close_price
+            # For approximate bid/ask, use close price (delayed data doesn't have live bid/ask)
+            bid = close_price  # Approximate
+            ask = close_price  # Approximate
+            mid = close_price
+            
+            # If we have high/low, use them for a rough bid/ask spread
+            if high_price > 0 and low_price > 0 and high_price != low_price:
+                bid = low_price
+                ask = high_price
+                mid = (high_price + low_price) / 2
+            
+            # Extract greeks
+            greeks = opt.greeks if hasattr(opt, 'greeks') else None
+            delta = float(greeks.delta) if greeks and hasattr(greeks, 'delta') and greeks.delta else None
+            gamma = float(greeks.gamma) if greeks and hasattr(greeks, 'gamma') and greeks.gamma else None
+            theta = float(greeks.theta) if greeks and hasattr(greeks, 'theta') and greeks.theta else None
+            vega = float(greeks.vega) if greeks and hasattr(greeks, 'vega') and greeks.vega else None
+            
+            # Extract IV
+            iv = None
+            if hasattr(opt, 'implied_volatility') and opt.implied_volatility:
+                iv = float(opt.implied_volatility) * 100  # Convert to percentage
+            
+            # Extract open interest
+            oi = int(opt.open_interest) if hasattr(opt, 'open_interest') and opt.open_interest else 0
+            
+            all_contracts.append({
+                "expiration": expiry,
+                "strike": strike,
+                "type": "C" if contract_type in ['CALL', 'C'] else "P",
+                "bid": bid,
+                "ask": ask,
+                "last": last,
+                "mid": mid,
+                "volume": volume,
+                "openInterest": oi,
+                "iv": iv,
+                "delta": delta,
+                "gamma": gamma,
+                "theta": theta,
+                "vega": vega,
+            })
+        
+        if not all_contracts:
+            return {
+                "symbol": symbol.upper(),
+                "underlying_price": underlying_price,
+                "expirations": [],
+                "strikes": [],
+                "calls": {},
+                "puts": {},
+                "error": "No options data returned. Check API subscription level."
+            }
+        
+        # Sort expirations and strikes
+        expirations = sorted(list(expirations_set))
+        all_strikes = sorted(list(strikes_set))
+        
+        # Filter strikes to those nearest underlying price
+        if underlying_price > 0 and len(all_strikes) > max_strikes:
+            half = max_strikes // 2
+            closest_idx = min(range(len(all_strikes)), key=lambda i: abs(all_strikes[i] - underlying_price))
+            start_idx = max(0, closest_idx - half)
+            end_idx = min(len(all_strikes), start_idx + max_strikes)
+            strikes = all_strikes[start_idx:end_idx]
+        else:
+            strikes = all_strikes[:max_strikes] if len(all_strikes) > max_strikes else all_strikes
+        
+        strikes_set_filtered = set(strikes)
+        
+        # Build calls and puts dictionaries
+        calls = {}  # expiry -> strike -> quote
+        puts = {}   # expiry -> strike -> quote
+        
+        for contract in all_contracts:
+            exp = contract["expiration"]
+            strike = contract["strike"]
+            
+            # Skip strikes outside our filtered range
+            if strike not in strikes_set_filtered:
+                continue
+            
+            quote = {
+                "strike": strike,
+                "expiration": exp,
+                "bid": contract["bid"],
+                "ask": contract["ask"],
+                "last": contract["last"],
+                "mid": contract["mid"],
+                "volume": contract["volume"],
+                "openInterest": contract["openInterest"],
+                "iv": contract["iv"],
+                "delta": contract["delta"],
+                "gamma": contract["gamma"],
+                "theta": contract["theta"],
+                "vega": contract["vega"],
+            }
+            
+            if contract["type"] == "C":
+                if exp not in calls:
+                    calls[exp] = {}
+                calls[exp][strike] = quote
+            else:
+                if exp not in puts:
+                    puts[exp] = {}
+                puts[exp][strike] = quote
+        
+        # Filter expirations to only those that have actual data
+        expirations_with_data = [exp for exp in expirations if exp in calls or exp in puts]
+        
+        print(f"DEBUG [Massive]: Options chain for {symbol} - {len(expirations_with_data)} expirations with data (of {len(expirations)} total), {len(strikes)} strikes, {len(all_contracts)} contracts")
+        
+        return {
+            "symbol": symbol.upper(),
+            "underlying_price": underlying_price,
+            "expirations": expirations_with_data,  # Only expirations with data
+            "strikes": strikes,
+            "calls": calls,
+            "puts": puts,
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"ERROR [Massive]: Failed to fetch options chain for {symbol}: {e}")
+        
+        # Check for authorization error
+        if "NOT_AUTHORIZED" in error_msg or "not entitled" in error_msg.lower():
+            return {
+                "symbol": symbol.upper(),
+                "underlying_price": 0,
+                "expirations": [],
+                "strikes": [],
+                "calls": {},
+                "puts": {},
+                "error": "Options data requires Massive.com Options subscription. Upgrade at https://polygon.io/pricing"
+            }
+        
+        return {
+            "symbol": symbol.upper(),
+            "underlying_price": 0,
+            "expirations": [],
+            "strikes": [],
+            "calls": {},
+            "puts": {},
+            "error": error_msg
+        }

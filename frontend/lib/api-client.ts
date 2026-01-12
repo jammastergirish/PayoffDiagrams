@@ -279,3 +279,53 @@ export async function placeTrade(order: TradeOrder): Promise<TradeResult> {
         return { success: false, error: e instanceof Error ? e.message : "Failed to place trade" };
     }
 }
+
+
+// =====================
+// Options Chain API
+// =====================
+
+export interface OptionQuote {
+    strike: number;
+    expiration: string;
+    bid: number;
+    ask: number;
+    last: number;
+    mid: number;
+    volume: number;
+    openInterest: number;
+    iv: number | null;
+    delta: number | null;
+    gamma: number | null;
+    theta: number | null;
+    vega: number | null;
+}
+
+export interface OptionsChain {
+    symbol: string;
+    underlying_price: number;
+    expirations: string[];
+    strikes: number[];
+    calls: Record<string, Record<number, OptionQuote>>; // expiry -> strike -> quote
+    puts: Record<string, Record<number, OptionQuote>>;
+    error?: string;
+}
+
+export async function fetchOptionsChain(symbol: string, maxStrikes: number = 30): Promise<OptionsChain> {
+    try {
+        const res = await fetch(`${API_BASE}/api/options-chain/${symbol}?max_strikes=${maxStrikes}`);
+        if (!res.ok) throw new Error("Failed to fetch options chain");
+        return await res.json();
+    } catch (e) {
+        console.error(e);
+        return { 
+            symbol, 
+            underlying_price: 0,
+            expirations: [], 
+            strikes: [], 
+            calls: {}, 
+            puts: {},
+            error: e instanceof Error ? e.message : "Failed to fetch options chain"
+        };
+    }
+}

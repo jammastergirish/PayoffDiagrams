@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .ib_client import ib_client, PositionModel
-from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot
+from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot, get_options_chain as massive_get_options_chain
 import asyncio
 import json
 from pathlib import Path
@@ -91,6 +91,23 @@ def place_trade(order: TradeOrder):
     )
     
     return result
+
+
+@app.get("/api/options-chain/{symbol}")
+def get_options_chain_endpoint(symbol: str, max_strikes: int = 30):
+    """
+    Get options chain for a symbol from Massive.com.
+    
+    Note: Requires Massive.com Options subscription.
+    
+    Args:
+        symbol: Stock ticker (e.g., AAPL)
+        max_strikes: Maximum number of strikes to return (centered around ATM)
+    
+    Returns:
+        Options chain with expirations, strikes, calls, and puts data
+    """
+    return massive_get_options_chain(symbol.upper(), max_strikes)
 
 
 # ============================================
