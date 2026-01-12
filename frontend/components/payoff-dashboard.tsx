@@ -113,7 +113,7 @@ export function PayoffDashboard() {
   // News State
   const [newsHeadlines, setNewsHeadlines] = useState<NewsHeadline[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
-  const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string } | null>(null);
+  const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string; body?: string; url?: string } | null>(null);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
 
   const startLoadTask = useCallback((key: string) => {
@@ -828,7 +828,9 @@ export function PayoffDashboard() {
                                 setSelectedArticle({
                                   articleId: news.articleId,
                                   providerCode: news.providerCode,
-                                  headline: news.headline
+                                  headline: news.headline,
+                                  body: news.body || news.teaser,
+                                  url: news.url
                                 });
                                 setIsNewsModalOpen(true);
                               }}
@@ -867,6 +869,8 @@ export function PayoffDashboard() {
                       providerCode={selectedArticle.providerCode}
                       articleId={selectedArticle.articleId}
                       headline={selectedArticle.headline}
+                      articleBody={selectedArticle.body}
+                      articleUrl={selectedArticle.url}
                     />
                   )}
                 </TabsContent>

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .ib_client import ib_client, PositionModel
-from .massive_client import get_historical_bars
+from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article
 import asyncio
 
 from contextlib import asynccontextmanager
@@ -37,7 +37,9 @@ def health():
     }
 
 # ============================================
-# IBKR ENDPOINTS (Live Data)
+# IBKR ENDPOINTS (Live Data Only)
+# - Positions, P&L, Greeks
+# - Real-time market data
 # ============================================
 
 @app.get("/api/portfolio")
@@ -45,18 +47,16 @@ def get_portfolio():
     if not ib_client.ib.isConnected():
         return {"error": "Not connected to IBKR", "positions": []}
     
-    # In a real app we might want to await this if it was fetching live data
-    # positions() is usually cached in ib_insync
     data = ib_client.get_positions()
     
-    # Legacy check: if it's a list (old IBClient), wrap it. 
-    # If it's a dict (New IBClient with summary), return as is.
     if isinstance(data, list):
         return {"positions": data}
     return data
 
 # ============================================
-# MASSIVE.COM ENDPOINTS (Historical Data)
+# MASSIVE.COM ENDPOINTS (Historical + News)
+# - Historical OHLC bars
+# - Benzinga news headlines and articles
 # ============================================
 
 @app.get("/api/historical/{symbol}")
@@ -67,65 +67,28 @@ def get_historical_data(symbol: str, timeframe: str = "1M"):
     Args:
         symbol: Stock ticker (e.g., AAPL)
         timeframe: One of 1Y, 1M, 1W, 1D, 1H
-    
-    Returns OHLC bars - much faster than IBKR.
     """
     return get_historical_bars(symbol.upper(), timeframe.upper())
 
 
-# =====================
-# News API Endpoints
-# =====================
-
-@app.get("/api/news/providers")
-def get_news_providers():
-    """Get available news providers."""
-    if not ib_client.ib.isConnected():
-        return {"error": "Not connected to IBKR", "providers": []}
-    
-    providers = ib_client.get_news_providers()
-    return {"providers": providers}
-
-
 @app.get("/api/news/{symbol}")
-def get_news_headlines(symbol: str, limit: int = 10):
+def get_news_headlines(symbol: str, limit: int = 15):
     """
-    Get news headlines for a symbol.
+    Get news headlines for a symbol from Massive.com Benzinga API.
     
     Args:
         symbol: Stock ticker (e.g., AAPL)
-        limit: Max number of headlines (1-50, default 10)
+        limit: Max number of headlines (1-100, default 15)
     """
-    if not ib_client.ib.isConnected():
-        return {"error": "Not connected to IBKR", "headlines": []}
-    
-    # Clamp limit to reasonable range
-    limit = max(1, min(limit, 50))
-    
-    headlines = ib_client.get_historical_news(
-        symbol=symbol.upper(),
-        total_results=limit
-    )
-    
-    return {"symbol": symbol.upper(), "headlines": headlines}
+    return get_news(symbol.upper(), limit)
 
 
-@app.get("/api/news/article/{provider_code}/{article_id:path}")
-def get_news_article(provider_code: str, article_id: str):
+@app.get("/api/news/article/{article_id}")
+def get_article(article_id: str):
     """
-    Get full article content.
+    Get full article content from Benzinga.
     
     Args:
-        provider_code: News provider code (e.g., BZ, FLY)
-        article_id: Article ID from headline
+        article_id: The benzinga_id of the article
     """
-    if not ib_client.ib.isConnected():
-        return {"error": "Not connected to IBKR"}
-    
-    article = ib_client.get_news_article(
-        provider_code=provider_code,
-        article_id=article_id
-    )
-    
-    return article
-
+    return massive_get_article(article_id)

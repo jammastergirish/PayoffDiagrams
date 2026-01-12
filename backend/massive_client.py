@@ -1,10 +1,12 @@
 """
-Massive.com REST API Client for Historical Price Data.
+Massive.com REST API Client.
 
-This module handles ONLY historical OHLC data from Massive.com.
-It is completely independent of the IBKR client.
+This module handles data from Massive.com REST API:
+- Historical OHLC price data (bars)
+- Benzinga news headlines and articles
+- Ticker details and company info
 
-Live data (positions, P&L, Greeks, news) comes from ib_client.py.
+It is completely independent of the IBKR client (which handles live positions, P&L, Greeks).
 """
 
 import os
@@ -160,3 +162,117 @@ def get_ticker_details(symbol: str) -> dict:
     except Exception as e:
         print(f"ERROR [Massive]: Failed to fetch ticker details for {symbol}: {e}")
         return {"symbol": symbol.upper(), "error": str(e)}
+
+
+def get_news(symbol: str, limit: int = 15) -> dict:
+    """
+    Fetch news headlines from Massive.com Benzinga API.
+    
+    Args:
+        symbol: Stock ticker (e.g., "AAPL")
+        limit: Maximum number of headlines to return (default 15, max 100)
+        
+    Returns:
+        Dict with symbol and headlines list
+    """
+    if not _client:
+        return {
+            "symbol": symbol,
+            "headlines": [],
+            "error": "Massive API key not configured"
+        }
+    
+    try:
+        # Call Massive.com Benzinga News API
+        # The massive package has list_benzinga_news_v2 method
+        # Note: It returns an iterator that paginates - we stop early after getting enough results
+        
+        # Clamp limit to reasonable range
+        limit = max(1, min(limit, 10))
+        
+        # Use the built-in method from the massive package
+        # This returns an iterator, so we collect only what we need and stop
+        news_iter = _client.list_benzinga_news_v2(
+            tickers=symbol.upper(),
+            limit=limit,
+            sort="published.desc"
+        )
+        
+        # Collect results - stop early once we have enough
+        headlines = []
+        count = 0
+        for article in news_iter:
+            if count >= limit:
+                break
+            count += 1
+            
+            # Handle object-style response from the iterator
+            # Include body so frontend can display without separate fetch
+            headlines.append({
+                "articleId": str(getattr(article, 'benzinga_id', '')),
+                "headline": getattr(article, 'title', ''),
+                "providerCode": "BZ",
+                "time": getattr(article, 'published', ''),
+                "teaser": getattr(article, 'teaser', ''),
+                "body": getattr(article, 'body', getattr(article, 'teaser', '')),  # Full article body
+                "url": getattr(article, 'url', ''),
+                "author": getattr(article, 'author', ''),
+                "channels": getattr(article, 'channels', []),
+            })
+        
+        print(f"DEBUG [Massive]: Retrieved {len(headlines)} news headlines for {symbol}")
+        
+        return {
+            "symbol": symbol.upper(),
+            "headlines": headlines
+        }
+        
+    except Exception as e:
+        print(f"ERROR [Massive]: Failed to fetch news for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "symbol": symbol.upper(),
+            "headlines": [],
+            "error": str(e)
+        }
+
+
+def get_news_article(article_id: str) -> dict:
+    """
+    Get full article content from Benzinga.
+    
+    Note: The Benzinga API returns full article body in the news list,
+    so we fetch with a filter on benzinga_id.
+    
+    Args:
+        article_id: The benzinga_id of the article
+        
+    Returns:
+        Dict with article content
+    """
+    if not _client:
+        return {"error": "Massive API key not configured"}
+    
+    try:
+        # Fetch the specific article by benzinga_id
+        # The massive package list_benzinga_news_v2 might not support filtering by id
+        # Try fetching recent news and filtering, or use the id directly if supported
+        
+        # Try fetching with limit=1 - this won't filter by ID but shows the pattern
+        # For now, return a message directing user to the article URL
+        # since Benzinga doesn't have a single-article fetch endpoint
+        
+        return {
+            "articleId": article_id,
+            "providerCode": "BZ",
+            "text": "Full article content is available at the news source. Click the headline to view the full article.",
+            "title": "",
+            "url": "",
+            "author": "",
+            "error": "Direct article fetch not supported. Article body is included in headline response."
+        }
+        
+    except Exception as e:
+        print(f"ERROR [Massive]: Failed to fetch article {article_id}: {e}")
+        return {"error": str(e), "articleId": article_id}

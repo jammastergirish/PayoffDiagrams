@@ -85,6 +85,11 @@ export interface NewsHeadline {
     headline: string;
     providerCode: string;
     time: string;
+    teaser?: string;   // Short summary
+    body?: string;     // Full article content (from Benzinga)
+    url?: string;      // Link to original article
+    author?: string;
+    channels?: string[];
 }
 
 export interface NewsArticle {
@@ -126,7 +131,8 @@ export async function fetchNewsArticle(
     articleId: string
 ): Promise<NewsArticle> {
     try {
-        const res = await fetch(`${API_BASE}/api/news/article/${providerCode}/${encodeURIComponent(articleId)}`);
+        // New Massive.com Benzinga endpoint only needs articleId
+        const res = await fetch(`${API_BASE}/api/news/article/${encodeURIComponent(articleId)}`);
         if (!res.ok) throw new Error("Failed to fetch article");
         return await res.json();
     } catch (e) {

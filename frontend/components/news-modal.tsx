@@ -7,7 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { fetchNewsArticle, NewsArticle } from "@/lib/api-client";
 
 interface NewsModalProps {
   isOpen: boolean;
@@ -15,50 +14,38 @@ interface NewsModalProps {
   providerCode: string;
   articleId: string;
   headline: string;
+  articleBody?: string;  // Body is now included in headline response
+  articleUrl?: string;   // Link to original article
 }
 
-export function NewsModal({ isOpen, onClose, providerCode, articleId, headline }: NewsModalProps) {
-  const [article, setArticle] = useState<NewsArticle | null>(null);
-  const [loading, setLoading] = useState(false);
+export function NewsModal({ isOpen, onClose, providerCode, articleId, headline, articleBody, articleUrl }: NewsModalProps) {
+  // No longer need to fetch - body is passed directly from headlines
 
-  useEffect(() => {
-    if (isOpen && articleId && providerCode) {
-      setLoading(true);
-      setArticle(null);
-      fetchNewsArticle(providerCode, articleId)
-        .then(data => setArticle(data))
-        .finally(() => setLoading(false));
-    }
-  }, [isOpen, articleId, providerCode]);
-
-  // Parse HTML content safely - just render as HTML since IBKR provides formatted content
   const renderContent = () => {
-    if (loading) {
-      return (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
-        </div>
-      );
-    }
-
-    if (!article) {
+    if (!articleBody) {
       return <div className="text-gray-500 py-8 text-center">No content available</div>;
     }
 
-    if (article.error) {
-      return (
-        <div className="text-red-400 py-8 text-center">
-          Error loading article: {article.error}
-        </div>
-      );
-    }
-
-    // The article text from IBKR is typically HTML
+    // The article text from Benzinga is typically HTML
     return (
-      <div 
-        className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed"
-        dangerouslySetInnerHTML={{ __html: article.text }}
-      />
+      <div className="space-y-4">
+        <div 
+          className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: articleBody }}
+        />
+        {articleUrl && (
+          <div className="pt-4 border-t border-white/10">
+            <a 
+              href={articleUrl} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-orange-400 hover:text-orange-300 text-sm"
+            >
+              Read full article on Benzinga →
+            </a>
+          </div>
+        )}
+      </div>
     );
   };
 
