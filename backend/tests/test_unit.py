@@ -4,24 +4,36 @@ from backend.ib_client import IBClient
 
 # Mock ib_insync classes
 class MockContract:
-    def __init__(self, symbol='AAPL', secType='STK', conId=1, right='?', strike=0, lastTradeDateOrContractMonth=''):
+    def __init__(self, symbol='AAPL', secType='STK', conId=1, right='?', strike=0, 
+                 lastTradeDateOrContractMonth='', exchange='SMART', primaryExchange='NASDAQ',
+                 currency='USD', localSymbol='AAPL', tradingClass='AAPL'):
         self.symbol = symbol
         self.secType = secType
         self.conId = conId
         self.right = right
         self.strike = strike
         self.lastTradeDateOrContractMonth = lastTradeDateOrContractMonth
+        self.exchange = exchange
+        self.primaryExchange = primaryExchange
+        self.currency = currency
+        self.localSymbol = localSymbol
+        self.tradingClass = tradingClass
 
 class MockPosition:
-    def __init__(self, contract, position=100, avgCost=150.0):
+    def __init__(self, contract, position=100, avgCost=150.0, account='TEST123'):
         self.contract = contract
         self.position = position
         self.avgCost = avgCost
+        self.account = account
 
 class MockPortfolioItem:
-    def __init__(self, contract, unrealizedPNL=500.0):
+    def __init__(self, contract, unrealizedPNL=500.0, marketPrice=100.0, marketValue=10000.0, position=100, account='TEST123'):
         self.contract = contract
         self.unrealizedPNL = unrealizedPNL
+        self.marketPrice = marketPrice
+        self.marketValue = marketValue
+        self.position = position
+        self.account = account
 
 @pytest.fixture
 def mock_ib():
@@ -47,11 +59,12 @@ def test_get_positions_stock(mock_ib):
     results = client.get_positions()
 
     # Assert
-    assert len(results) == 1
-    assert results[0]['ticker'] == 'NVDA'
-    assert results[0]['position_type'] == 'stock'
-    assert results[0]['qty'] == 10
-    assert results[0]['cost_basis'] == 400.0
+    positions = results['positions']
+    assert len(positions) == 1
+    assert positions[0]['ticker'] == 'NVDA'
+    assert positions[0]['position_type'] == 'stock'
+    assert positions[0]['qty'] == 10
+    assert positions[0]['cost_basis'] == 400.0
 
 def test_get_positions_option(mock_ib):
     # Setup
@@ -78,8 +91,9 @@ def test_get_positions_option(mock_ib):
     results = client.get_positions()
 
     # Assert
-    assert len(results) == 1
-    assert results[0]['ticker'] == 'SPY'
-    assert results[0]['position_type'] == 'call'
-    assert results[0]['expiry'] == '2025-01-17'
-    assert results[0]['unrealized_pnl'] == 1250.0
+    positions = results['positions']
+    assert len(positions) == 1
+    assert positions[0]['ticker'] == 'SPY'
+    assert positions[0]['position_type'] == 'call'
+    assert positions[0]['expiry'] == '2025-01-17'
+    assert positions[0]['unrealized_pnl'] == 1250.0
