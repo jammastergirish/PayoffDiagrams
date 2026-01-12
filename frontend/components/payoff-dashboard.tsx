@@ -22,6 +22,7 @@ import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, Historical
 import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
 import { CandlestickChart } from "@/components/candlestick-chart";
+import { useToast } from "@/components/ui/toast";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 
 import {
@@ -171,7 +172,7 @@ export function PayoffDashboard() {
   const [tradeOrderType, setTradeOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
   const [tradeLimitPrice, setTradeLimitPrice] = useState<string>("");
   const [tradeSubmitting, setTradeSubmitting] = useState(false);
-  const [tradeResult, setTradeResult] = useState<TradeResult | null>(null);
+  const { showToast } = useToast();
 
   const startLoadTask = useCallback((key: string) => {
     setLoadTasks(prev => {
@@ -1361,6 +1362,71 @@ export function PayoffDashboard() {
                         </div>
                       ) : (
                         <div className="max-w-md mx-auto space-y-6">
+                          {/* Quick Trade Buttons */}
+                          {selectedTicker && currentPrice > 0 && (
+                            <div className="space-y-3">
+                              <div className="text-sm text-gray-500 uppercase tracking-wider">Quick Trade (Market Order)</div>
+                              <div className="grid grid-cols-3 gap-2">
+                                {[10000, 50000, 100000].map((amount) => {
+                                  const qty = Math.floor(amount / currentPrice);
+                                  return qty > 0 ? (
+                                    <div key={amount} className="space-y-1">
+                                      <button
+                                        onClick={async () => {
+                                          setTradeSubmitting(true);
+                                          const result = await placeTrade({
+                                            symbol: selectedTicker,
+                                            action: "BUY",
+                                            quantity: qty,
+                                            order_type: "MARKET",
+                                          });
+                                          if (result.success) {
+                                            showToast(`✓ BUY ${qty} ${selectedTicker} - Order #${result.order_id}`, "success");
+                                          } else {
+                                            showToast(`✗ Order failed: ${result.error}`, "error");
+                                          }
+                                          setTradeSubmitting(false);
+                                        }}
+                                        disabled={tradeSubmitting}
+                                        className="w-full py-2 px-2 rounded-lg font-bold text-sm bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30 transition-all disabled:opacity-50"
+                                      >
+                                        BUY ~${(amount/1000).toFixed(0)}k
+                                      </button>
+                                      <button
+                                        onClick={async () => {
+                                          setTradeSubmitting(true);
+                                          const result = await placeTrade({
+                                            symbol: selectedTicker,
+                                            action: "SELL",
+                                            quantity: qty,
+                                            order_type: "MARKET",
+                                          });
+                                          if (result.success) {
+                                            showToast(`✓ SELL ${qty} ${selectedTicker} - Order #${result.order_id}`, "success");
+                                          } else {
+                                            showToast(`✗ Order failed: ${result.error}`, "error");
+                                          }
+                                          setTradeSubmitting(false);
+                                        }}
+                                        disabled={tradeSubmitting}
+                                        className="w-full py-2 px-2 rounded-lg font-bold text-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all disabled:opacity-50"
+                                      >
+                                        SELL ~${(amount/1000).toFixed(0)}k
+                                      </button>
+                                      <div className="text-[10px] text-gray-500 text-center">
+                                        {qty} shares
+                                      </div>
+                                    </div>
+                                  ) : null;
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="border-t border-white/10 pt-6">
+                            <div className="text-sm text-gray-500 uppercase tracking-wider mb-4">Custom Order</div>
+                          </div>
+
                           {/* Action Toggle */}
                           <div>
                             <div className="text-sm text-gray-500 uppercase tracking-wider mb-2">Action</div>
@@ -1472,7 +1538,6 @@ export function PayoffDashboard() {
                             onClick={async () => {
                               if (!selectedTicker) return;
                               setTradeSubmitting(true);
-                              setTradeResult(null);
                               
                               const order: TradeOrder = {
                                 symbol: selectedTicker,
@@ -1483,7 +1548,11 @@ export function PayoffDashboard() {
                               };
                               
                               const result = await placeTrade(order);
-                              setTradeResult(result);
+                              if (result.success) {
+                                showToast(`✓ ${tradeAction} ${tradeQuantity} ${selectedTicker} - Order #${result.order_id}`, "success");
+                              } else {
+                                showToast(`✗ Order failed: ${result.error}`, "error");
+                              }
                               setTradeSubmitting(false);
                             }}
                             disabled={!selectedTicker || tradeSubmitting || (tradeOrderType === "LIMIT" && (!tradeLimitPrice || parseFloat(tradeLimitPrice) <= 0))}
@@ -1502,30 +1571,6 @@ export function PayoffDashboard() {
                               `${tradeAction} ${selectedTicker || "---"}`
                             )}
                           </Button>
-
-                          {/* Trade Result */}
-                          {tradeResult && (
-                            <div className={`p-4 rounded-lg border ${
-                              tradeResult.success
-                                ? "bg-green-500/10 border-green-500/30 text-green-400"
-                                : "bg-red-500/10 border-red-500/30 text-red-400"
-                            }`}>
-                              {tradeResult.success ? (
-                                <div>
-                                  <div className="font-bold">✓ Order Placed Successfully</div>
-                                  <div className="text-sm mt-1 opacity-80">
-                                    Order ID: {tradeResult.order_id} | Status: {tradeResult.status}
-                                  </div>
-                                  <div className="text-sm mt-1 opacity-60">{tradeResult.message}</div>
-                                </div>
-                              ) : (
-                                <div>
-                                  <div className="font-bold">✗ Order Failed</div>
-                                  <div className="text-sm mt-1 opacity-80">{tradeResult.error}</div>
-                                </div>
-                              )}
-                            </div>
-                          )}
                         </div>
                       )}
                     </CardContent>
