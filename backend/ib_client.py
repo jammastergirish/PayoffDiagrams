@@ -346,11 +346,14 @@ class IBClient:
                             "net_liquidation": 0.0,
                             "unrealized_pnl": 0.0,
                             "realized_pnl": 0.0,
-                            "daily_pnl": 0.0
+                            "daily_pnl": 0.0,
+                            "buying_power": 0.0
                         }
 
                     if val.tag == 'NetLiquidation':
                         accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
+                    elif val.tag == 'BuyingPower':
+                        accounts_summary[acc_id]["buying_power"] = self._safe_float(val.value)
 
             # Second pass: get P&L from reqPnL subscriptions (the CORRECT source)
             for acc_id in list(accounts_summary.keys()):

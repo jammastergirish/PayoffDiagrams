@@ -27,6 +27,7 @@ export interface AccountSummary {
     unrealized_pnl: number;
     realized_pnl: number;
     daily_pnl: number;
+    buying_power?: number;
 }
 
 export function cleanNumber(value: unknown): number {
