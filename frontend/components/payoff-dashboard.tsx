@@ -67,6 +67,28 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&nbsp;/g, ' ');
 }
 
+// Format date as YYYY-MM-DD
+function formatDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Format datetime as YYYY-MM-DD HH:MM
+function formatDateTime(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${mins}`;
+}
+
 export function PayoffDashboard() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({});
@@ -890,7 +912,7 @@ export function PayoffDashboard() {
                                       {news.providerName || news.providerCode}
                                     </span>
                                     <span className="text-xs text-gray-500">
-                                      {new Date(news.time).toLocaleString()}
+                                      {formatDateTime(news.time)}
                                     </span>
                                   </div>
                                 </div>
@@ -992,7 +1014,7 @@ export function PayoffDashboard() {
                                 <div className="flex justify-between mb-2">
                                     <Label className="text-cyan-100">Date Simulation</Label>
                                     <span className="text-sm font-mono text-cyan-200">
-                                        {targetDate.toLocaleDateString()} <span className="text-xs text-gray-500">({daysOffset === 0 ? 'Today' : `+${daysOffset}d`})</span>
+                                        {formatDate(targetDate)} <span className="text-xs text-gray-500">({daysOffset === 0 ? 'Today' : `+${daysOffset}d`})</span>
                                     </span>
                                 </div>
                                 <Slider 
