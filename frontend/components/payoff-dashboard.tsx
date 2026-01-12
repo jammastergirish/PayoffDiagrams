@@ -444,7 +444,7 @@ export function PayoffDashboard() {
             if (updatedData.accounts) setAccounts(updatedData.accounts);
             if (updatedData.summary) setAccountSummaries(updatedData.summary);
             applyLivePrices(updated);
-          }, 5000);
+          }, 1000);
 
           const chartPrefetchTickers = tickerList.filter(t => t !== primaryTicker);
           registerLoadTasks(chartPrefetchTickers.map(t => `chart:${t}:1M`));
@@ -876,10 +876,6 @@ export function PayoffDashboard() {
                     );
                   })}
                   
-                  <div className="my-2 border-b border-white/10" />
-                  <Button variant="ghost" onClick={() => setPositions([])} className="w-full text-red-500 hover:text-red-400 hover:bg-red-500/10">
-                    Reset
-                  </Button>
                </CardContent>
             </Card>
 
