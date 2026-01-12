@@ -243,54 +243,74 @@ export function PayoffDashboard() {
   const cachedChartBars = selectedTicker ? priceChartCache[selectedTicker]?.[chartTimeframe] : undefined;
 
   // Fetch historical data when ticker or timeframe changes
+  // Poll every 60 seconds for intraday timeframes (1H, 1D)
   useEffect(() => {
     let isCurrent = true;
+    let pollInterval: NodeJS.Timeout | null = null;
 
     if (!selectedTicker || !isLiveMode || !ibConnected) {
       setPriceChartData([]);
       setChartLoading(false);
       return () => {
         isCurrent = false;
+        if (pollInterval) clearInterval(pollInterval);
       };
     }
     
+    // Use cache for initial display
     if (cachedChartBars && cachedChartBars.length > 0) {
       setPriceChartData(cachedChartBars);
       setChartLoading(false);
-      return () => {
-        isCurrent = false;
-      };
     }
     
-    const taskKey = `chart:${selectedTicker}:${chartTimeframe}`;
-    startLoadTask(taskKey);
-    setChartLoading(true);
-    fetchHistoricalData(selectedTicker, chartTimeframe)
-      .then(data => {
-        if (!isMountedRef.current || !isCurrent) return;
-        const bars = data.bars || [];
-        setPriceChartData(bars);
-        if (bars.length > 0) {
-          setPriceChartCache(prev => ({
-            ...prev,
-            [selectedTicker]: {
-              ...(prev[selectedTicker] || {}),
-              [chartTimeframe]: bars,
-            },
-          }));
-        }
-      })
-      .finally(() => {
-        if (!isMountedRef.current) return;
-        completeLoadTask(taskKey);
+    const fetchChartData = (showLoading: boolean = true) => {
+      const taskKey = `chart:${selectedTicker}:${chartTimeframe}`;
+      if (showLoading) {
+        startLoadTask(taskKey);
+        setChartLoading(true);
+      }
+      fetchHistoricalData(selectedTicker, chartTimeframe)
+        .then(data => {
+          if (!isMountedRef.current || !isCurrent) return;
+          const bars = data.bars || [];
+          setPriceChartData(bars);
+          if (bars.length > 0) {
+            setPriceChartCache(prev => ({
+              ...prev,
+              [selectedTicker]: {
+                ...(prev[selectedTicker] || {}),
+                [chartTimeframe]: bars,
+              },
+            }));
+          }
+        })
+        .finally(() => {
+          if (!isMountedRef.current) return;
+          completeLoadTask(taskKey);
+          if (isCurrent) {
+            setChartLoading(false);
+          }
+        });
+    };
+    
+    // Initial fetch
+    fetchChartData(true);
+    
+    // Poll every 60 seconds for intraday timeframes
+    const isIntraday = chartTimeframe === '1H' || chartTimeframe === '1D';
+    if (isIntraday) {
+      pollInterval = setInterval(() => {
         if (isCurrent) {
-          setChartLoading(false);
+          fetchChartData(false); // Don't show loading spinner for background refreshes
         }
-      });
+      }, 10000); // 10 seconds
+    }
+    
     return () => {
       isCurrent = false;
+      if (pollInterval) clearInterval(pollInterval);
     };
-  }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected, cachedChartBars, startLoadTask, completeLoadTask]);
+  }, [selectedTicker, chartTimeframe, isLiveMode, ibConnected, startLoadTask, completeLoadTask]);
 
   // Fetch news when ticker changes and poll every 30 seconds
   useEffect(() => {
@@ -390,10 +410,15 @@ export function PayoffDashboard() {
       const livePrices: Record<string, number> = {};
       pos.forEach(p => {
         if (!p.ticker) return;
+        let price = 0;
         if (p.position_type === "stock" && p.current_price) {
-          livePrices[p.ticker] = p.current_price;
+          price = p.current_price;
         } else if (p.position_type !== "stock" && p.underlying_price) {
-          livePrices[p.ticker] = p.underlying_price;
+          price = p.underlying_price;
+        }
+        // Only update if we found a valid price AND (no existing price OR this one is better)
+        if (price > 0 && (!livePrices[p.ticker] || price > 0)) {
+          livePrices[p.ticker] = price;
         }
       });
       setStockPrices(prev => ({ ...prev, ...livePrices }));
@@ -936,18 +961,18 @@ export function PayoffDashboard() {
                           </div>
                         )}
                         {/* Watchlist ticker: show daily change % */}
-                        {isWatchlistOnly && snapshotCache[t] && (
+                        {isWatchlistOnly && (snapshotCache[t] || stockPrices[t]) && (
                           <div className="flex justify-between mt-2 text-xs">
                             <div>
                               <div className="text-gray-500">Price</div>
                               <div className="text-white">
-                                ${snapshotCache[t].current_price?.toFixed(2) || '-'}
+                                ${(stockPrices[t] || snapshotCache[t]?.current_price)?.toFixed(2) || '-'}
                               </div>
                             </div>
                             <div className="text-right">
                               <div className="text-gray-500">Today</div>
-                              <div className={(snapshotCache[t].change_pct || 0) >= 0 ? "text-green-400" : "text-red-400"}>
-                                {(snapshotCache[t].change_pct || 0) >= 0 ? '+' : ''}{(snapshotCache[t].change_pct || 0).toFixed(2)}%
+                              <div className={(snapshotCache[t]?.change_pct || 0) >= 0 ? "text-green-400" : "text-red-400"}>
+                                {(snapshotCache[t]?.change_pct || 0) >= 0 ? '+' : ''}{(snapshotCache[t]?.change_pct || 0).toFixed(2)}%
                               </div>
                             </div>
                           </div>
