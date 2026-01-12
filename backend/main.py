@@ -93,6 +93,50 @@ def place_trade(order: TradeOrder):
     return result
 
 
+# Options Trade Order Model
+from typing import List
+
+class OptionLeg(BaseModel):
+    symbol: str
+    expiry: str  # YYYYMMDD format
+    strike: float
+    right: Literal["C", "P"]
+    action: Literal["BUY", "SELL"]
+    quantity: int
+
+class OptionsTradeOrder(BaseModel):
+    legs: List[OptionLeg]
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET"
+    limit_price: Optional[float] = None
+
+
+@app.post("/api/options/trade")
+def place_options_trade(order: OptionsTradeOrder):
+    """
+    Place an options order through IBKR.
+    
+    Supports single-leg orders and multi-leg combos (spreads, etc.)
+    
+    Args:
+        order: OptionsTradeOrder with legs, order_type, and optional limit_price
+    
+    Returns:
+        Order result with success status, order_id, and message/error
+    """
+    if not ib_client.ib.isConnected():
+        return {"success": False, "error": "Not connected to IBKR"}
+    
+    # Convert Pydantic models to dicts for the IB client
+    legs_data = [leg.model_dump() for leg in order.legs]
+    
+    result = ib_client.place_options_order(
+        legs=legs_data,
+        order_type=order.order_type,
+        limit_price=order.limit_price
+    )
+    
+    return result
+
 @app.get("/api/options-chain/{symbol}")
 def get_options_chain_endpoint(symbol: str, max_strikes: int = 30):
     """

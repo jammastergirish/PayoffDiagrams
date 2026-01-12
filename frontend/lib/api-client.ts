@@ -329,3 +329,38 @@ export async function fetchOptionsChain(symbol: string, maxStrikes: number = 30)
         };
     }
 }
+
+
+// =====================
+// Options Trading API
+// =====================
+
+export interface OptionLeg {
+    symbol: string;
+    expiry: string;  // YYYYMMDD format
+    strike: number;
+    right: "C" | "P";
+    action: "BUY" | "SELL";
+    quantity: number;
+}
+
+export interface OptionsTradeOrder {
+    legs: OptionLeg[];
+    order_type: "MARKET" | "LIMIT";
+    limit_price?: number;
+}
+
+export async function placeOptionsOrder(order: OptionsTradeOrder): Promise<TradeResult> {
+    try {
+        const res = await fetch(`${API_BASE}/api/options/trade`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(order),
+        });
+        if (!res.ok) throw new Error("Failed to place options order");
+        return await res.json();
+    } catch (e) {
+        console.error(e);
+        return { success: false, error: e instanceof Error ? e.message : "Failed to place options order" };
+    }
+}

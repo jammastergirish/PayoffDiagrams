@@ -469,6 +469,143 @@ class IBClient:
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
+    def place_options_order(self, legs: list, order_type: str = "MARKET", limit_price: float = None) -> dict:
+        """
+        Place an options order (single leg or multi-leg combo).
+        
+        Args:
+            legs: List of leg dicts with keys:
+                - symbol: Underlying symbol (e.g., "AAPL")
+                - expiry: Expiration date as YYYYMMDD (e.g., "20260116")
+                - strike: Strike price (e.g., 250.0)
+                - right: "C" for call, "P" for put
+                - action: "BUY" or "SELL"
+                - quantity: Number of contracts (e.g., 1)
+            order_type: "MARKET" or "LIMIT"
+            limit_price: Required for LIMIT orders (net debit/credit for combos)
+            
+        Returns:
+            dict with success status, order_id(s), and message/error
+        """
+        if not self.connected:
+            return {"success": False, "error": "Not connected to IBKR"}
+        
+        if not legs or len(legs) == 0:
+            return {"success": False, "error": "No legs provided"}
+        
+        try:
+            if len(legs) == 1:
+                # Single leg order
+                leg = legs[0]
+                
+                # Create option contract
+                # Expiry format for ib_insync: YYYYMMDD
+                contract = Option(
+                    symbol=leg["symbol"].upper(),
+                    lastTradeDateOrContractMonth=leg["expiry"],
+                    strike=float(leg["strike"]),
+                    right=leg["right"].upper(),
+                    exchange='SMART',
+                    currency='USD'
+                )
+                
+                # Create order
+                action = leg["action"].upper()
+                quantity = int(leg["quantity"])
+                
+                if order_type == "MARKET":
+                    order = MarketOrder(action, quantity)
+                else:
+                    if limit_price is None:
+                        return {"success": False, "error": "Limit price required for LIMIT orders"}
+                    order = LimitOrder(action, quantity, limit_price)
+                
+                # Place the order
+                trade = self.ib.placeOrder(contract, order)
+                
+                order_id = trade.order.orderId
+                status = trade.orderStatus.status if trade.orderStatus else "Submitted"
+                
+                print(f"DEBUG: Options order placed - ID: {order_id}, Status: {status}")
+                
+                return {
+                    "success": True,
+                    "order_id": order_id,
+                    "status": status,
+                    "message": f"{action} {quantity} {leg['symbol']} {leg['expiry']} {leg['strike']}{leg['right']} @ {order_type}"
+                }
+            
+            else:
+                # Multi-leg combo order
+                # First, qualify each leg contract to get conId
+                combo_legs = []
+                
+                for i, leg in enumerate(legs):
+                    contract = Option(
+                        symbol=leg["symbol"].upper(),
+                        lastTradeDateOrContractMonth=leg["expiry"],
+                        strike=float(leg["strike"]),
+                        right=leg["right"].upper(),
+                        exchange='SMART',
+                        currency='USD'
+                    )
+                    
+                    # Qualify to get conId
+                    qualified = self.ib.qualifyContracts(contract)
+                    if not qualified:
+                        return {"success": False, "error": f"Could not qualify contract for leg {i+1}"}
+                    
+                    qual_contract = qualified[0]
+                    
+                    from ib_insync import ComboLeg
+                    combo_leg = ComboLeg(
+                        conId=qual_contract.conId,
+                        ratio=int(leg["quantity"]),
+                        action=leg["action"].upper(),
+                        exchange='SMART'
+                    )
+                    combo_legs.append(combo_leg)
+                
+                # Create Bag contract for the combo
+                from ib_insync import Contract
+                bag = Contract()
+                bag.symbol = legs[0]["symbol"].upper()
+                bag.secType = 'BAG'
+                bag.currency = 'USD'
+                bag.exchange = 'SMART'
+                bag.comboLegs = combo_legs
+                
+                # Create order - for combos, quantity is typically 1 (the combo itself)
+                if order_type == "MARKET":
+                    order = MarketOrder("BUY", 1)  # BUY the combo
+                else:
+                    if limit_price is None:
+                        return {"success": False, "error": "Limit price required for LIMIT orders"}
+                    # Positive limit = debit, negative = credit
+                    order = LimitOrder("BUY", 1, limit_price)
+                
+                # Place the order
+                trade = self.ib.placeOrder(bag, order)
+                
+                order_id = trade.order.orderId
+                status = trade.orderStatus.status if trade.orderStatus else "Submitted"
+                
+                leg_desc = ", ".join([f"{l['action']} {l['quantity']} {l['symbol']} {l['strike']}{l['right']}" for l in legs])
+                print(f"DEBUG: Combo order placed - ID: {order_id}, Status: {status}, Legs: {leg_desc}")
+                
+                return {
+                    "success": True,
+                    "order_id": order_id,
+                    "status": status,
+                    "message": f"Combo order: {leg_desc} @ {order_type}"
+                }
+                
+        except Exception as e:
+            print(f"Error placing options order: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
+
     def disconnect(self):
         if self.connected:
             try:

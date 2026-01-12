@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote, placeOptionsOrder, OptionLeg } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
 import { CandlestickChart } from "@/components/candlestick-chart";
@@ -180,6 +180,81 @@ export function PayoffDashboard() {
   const [selectedExpiry, setSelectedExpiry] = useState<string>("");
   const [activeTab, setActiveTab] = useState<string>("payoff");
 
+  // Strategy Builder State
+  const [selectedLegs, setSelectedLegs] = useState<OptionLeg[]>([]);
+  const [optionsOrderType, setOptionsOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [optionsLimitPrice, setOptionsLimitPrice] = useState<string>("");
+  const [optionsOrderSubmitting, setOptionsOrderSubmitting] = useState(false);
+
+  // Helper to add a leg to the strategy
+  const addLegToStrategy = (expiry: string, strike: number, right: "C" | "P", action: "BUY" | "SELL", mid: number) => {
+    if (!selectedTicker) return;
+    
+    // Check if leg already exists (same expiry, strike, right)
+    const exists = selectedLegs.find(
+      l => l.expiry === expiry && l.strike === strike && l.right === right
+    );
+    if (exists) return; // Don't add duplicate
+    
+    const newLeg: OptionLeg = {
+      symbol: selectedTicker,
+      expiry: expiry.replace(/-/g, ""), // Convert YYYY-MM-DD to YYYYMMDD
+      strike,
+      right,
+      action,
+      quantity: 1,
+    };
+    setSelectedLegs([...selectedLegs, newLeg]);
+  };
+
+  // Helper to remove a leg from strategy
+  const removeLeg = (index: number) => {
+    setSelectedLegs(selectedLegs.filter((_, i) => i !== index));
+  };
+
+  // Helper to update a leg's action or quantity
+  const updateLeg = (index: number, field: "action" | "quantity", value: "BUY" | "SELL" | number) => {
+    const updated = [...selectedLegs];
+    if (field === "action") {
+      updated[index].action = value as "BUY" | "SELL";
+    } else {
+      updated[index].quantity = value as number;
+    }
+    setSelectedLegs(updated);
+  };
+
+  // Calculate estimated cost/credit for a leg
+  const getLegPrice = (leg: OptionLeg): number => {
+    if (!optionsChain) return 0;
+    // Convert expiry from YYYYMMDD to the format used in optionsChain
+    // The chain might use YYYY-MM-DD or YYYYMMDD, try both formats
+    const expiryWithDashes = leg.expiry.length === 8 
+      ? `${leg.expiry.slice(0,4)}-${leg.expiry.slice(4,6)}-${leg.expiry.slice(6,8)}`
+      : leg.expiry;
+    
+    const quote = leg.right === "C" 
+      ? (optionsChain.calls[leg.expiry]?.[leg.strike] || optionsChain.calls[expiryWithDashes]?.[leg.strike])
+      : (optionsChain.puts[leg.expiry]?.[leg.strike] || optionsChain.puts[expiryWithDashes]?.[leg.strike]);
+    if (!quote) return 0;
+    const mid = quote.mid || quote.last || 0;
+    // BUY = pay (positive), SELL = receive (negative)
+    return (leg.action === "BUY" ? mid : -mid) * leg.quantity * 100;
+  };
+
+  // Check if a specific cell (bid/ask) is selected in the strategy builder
+  // action: "SELL" = bid column, "BUY" = ask column
+  const isLegSelected = (expiry: string, strike: number, right: "C" | "P", action: "BUY" | "SELL"): boolean => {
+    const expiryNoDashes = expiry.replace(/-/g, "");
+    return selectedLegs.some(
+      l => (l.expiry === expiry || l.expiry === expiryNoDashes) && l.strike === strike && l.right === right && l.action === action
+    );
+  };
+
+  // Calculate net debit/credit
+  const netCost = useMemo(() => {
+    return selectedLegs.reduce((sum, leg) => sum + getLegPrice(leg), 0);
+  }, [selectedLegs, optionsChain]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-load options chain when switching to options tab or changing ticker
   const loadOptionsChain = useCallback(async (ticker: string) => {
     if (!ticker || optionsChainLoading) return;
@@ -196,11 +271,13 @@ export function PayoffDashboard() {
   useEffect(() => {
     setOptionsChain(null);
     setSelectedExpiry("");
+    setSelectedLegs([]); // Also clear strategy when ticker changes
     // Auto-reload if on options tab
     if (activeTab === "options" && selectedTicker) {
       loadOptionsChain(selectedTicker);
     }
   }, [selectedTicker]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const startLoadTask = useCallback((key: string) => {
     setLoadTasks(prev => {
@@ -1643,30 +1720,24 @@ export function PayoffDashboard() {
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-lg text-purple-400">Options Chain</CardTitle>
-                        <Button
-                          size="sm"
-                          onClick={async () => {
-                            if (!selectedTicker || !ibConnected) return;
-                            setOptionsChainLoading(true);
-                            const chain = await fetchOptionsChain(selectedTicker);
-                            setOptionsChain(chain);
-                            if (chain.expirations.length > 0 && !selectedExpiry) {
-                              setSelectedExpiry(chain.expirations[0]);
-                            }
-                            setOptionsChainLoading(false);
-                          }}
-                          disabled={!selectedTicker || optionsChainLoading}
-                          className="bg-purple-500 hover:bg-purple-600"
-                        >
-                          {optionsChainLoading ? (
-                            <span className="flex items-center gap-2">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                              Loading...
-                            </span>
-                          ) : (
-                            "Load Chain"
-                          )}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">Click bid to sell, ask to buy</span>
+                          <Button
+                            size="sm"
+                            onClick={() => loadOptionsChain(selectedTicker || "")}
+                            disabled={!selectedTicker || optionsChainLoading}
+                            className="bg-purple-500 hover:bg-purple-600"
+                          >
+                            {optionsChainLoading ? (
+                              <span className="flex items-center gap-2">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                                Loading...
+                              </span>
+                            ) : (
+                              "Refresh"
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -1675,20 +1746,14 @@ export function PayoffDashboard() {
                       )}
                       
                       {selectedTicker && !optionsChain && !optionsChainLoading && (
-                        <div className="text-center text-gray-500 py-12">Click "Load Chain" to fetch options data</div>
+                        <div className="text-center text-gray-500 py-12">Loading options chain...</div>
                       )}
                       
                       {optionsChain && optionsChain.expirations.length > 0 && (
                         <div className="space-y-4">
-                          {/* Underlying Price */}
-                          <div className="text-sm text-gray-400">
-                            Underlying: <span className="text-white font-medium">${optionsChain.underlying_price.toFixed(2)}</span>
-                          </div>
-                          
                           {/* Expiration Tabs */}
                           <div className="flex gap-1 overflow-x-auto pb-2">
                             {optionsChain.expirations.map(exp => {
-                              // Format expiry date for display (YYYYMMDD -> MMM DD)
                               const formatted = exp.length === 8 
                                 ? `${exp.slice(4,6)}/${exp.slice(6,8)}`
                                 : exp;
@@ -1710,9 +1775,9 @@ export function PayoffDashboard() {
                           
                           {/* Options Table */}
                           {selectedExpiry && (optionsChain.calls[selectedExpiry] || optionsChain.puts[selectedExpiry]) && (
-                            <div className="overflow-x-auto">
+                            <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
                               <table className="w-full text-xs">
-                                <thead>
+                                <thead className="sticky top-0 bg-slate-950">
                                   <tr className="border-b border-white/10">
                                     <th colSpan={5} className="text-center text-green-400 py-2 border-r border-white/10">CALLS</th>
                                     <th className="text-center text-white py-2 px-2">Strike</th>
@@ -1743,15 +1808,35 @@ export function PayoffDashboard() {
                                     return (
                                       <tr 
                                         key={strike} 
-                                        className={`border-b border-white/5 hover:bg-white/5 ${isAtm ? "bg-purple-500/10" : ""}`}
+                                        className={`border-b border-white/5 ${isAtm ? "bg-purple-500/10" : ""}`}
                                       >
-                                        {/* Call Side */}
-                                        <td className={`text-right py-1 px-1 ${callItm ? "bg-green-500/10" : ""}`}>
-                                          {call?.bid?.toFixed(2) || "-"}
-                                        </td>
-                                        <td className={`text-right py-1 px-1 ${callItm ? "bg-green-500/10" : ""}`}>
-                                          {call?.ask?.toFixed(2) || "-"}
-                                        </td>
+                                        {/* Call Side - clickable bid (sell) and ask (buy) */}
+                                        {(() => {
+                                          const callSellSelected = isLegSelected(selectedExpiry, strike, "C", "SELL");
+                                          const callBuySelected = isLegSelected(selectedExpiry, strike, "C", "BUY");
+                                          return (
+                                            <>
+                                              <td 
+                                                className={`text-right py-1 px-1 cursor-pointer transition-colors ${
+                                                  callSellSelected ? "bg-red-500/40 ring-1 ring-red-400" : "hover:bg-red-500/30"
+                                                } ${callItm && !callSellSelected ? "bg-green-500/10" : ""}`}
+                                                onClick={() => call && addLegToStrategy(selectedExpiry, strike, "C", "SELL", call.mid)}
+                                                title="Sell Call"
+                                              >
+                                                {call?.bid?.toFixed(2) || "-"}
+                                              </td>
+                                              <td 
+                                                className={`text-right py-1 px-1 cursor-pointer transition-colors ${
+                                                  callBuySelected ? "bg-green-500/40 ring-1 ring-green-400" : "hover:bg-green-500/30"
+                                                } ${callItm && !callBuySelected ? "bg-green-500/10" : ""}`}
+                                                onClick={() => call && addLegToStrategy(selectedExpiry, strike, "C", "BUY", call.mid)}
+                                                title="Buy Call"
+                                              >
+                                                {call?.ask?.toFixed(2) || "-"}
+                                              </td>
+                                            </>
+                                          );
+                                        })()}
                                         <td className={`text-right py-1 px-1 ${callItm ? "bg-green-500/10" : ""}`}>
                                           {call?.last?.toFixed(2) || "-"}
                                         </td>
@@ -1767,13 +1852,33 @@ export function PayoffDashboard() {
                                           {strike.toFixed(2)}
                                         </td>
                                         
-                                        {/* Put Side */}
-                                        <td className={`text-right py-1 px-1 border-l border-white/10 ${putItm ? "bg-red-500/10" : ""}`}>
-                                          {put?.bid?.toFixed(2) || "-"}
-                                        </td>
-                                        <td className={`text-right py-1 px-1 ${putItm ? "bg-red-500/10" : ""}`}>
-                                          {put?.ask?.toFixed(2) || "-"}
-                                        </td>
+                                        {/* Put Side - clickable bid (sell) and ask (buy) */}
+                                        {(() => {
+                                          const putSellSelected = isLegSelected(selectedExpiry, strike, "P", "SELL");
+                                          const putBuySelected = isLegSelected(selectedExpiry, strike, "P", "BUY");
+                                          return (
+                                            <>
+                                              <td 
+                                                className={`text-right py-1 px-1 border-l border-white/10 cursor-pointer transition-colors ${
+                                                  putSellSelected ? "bg-red-500/40 ring-1 ring-red-400" : "hover:bg-red-500/30"
+                                                } ${putItm && !putSellSelected ? "bg-red-500/10" : ""}`}
+                                                onClick={() => put && addLegToStrategy(selectedExpiry, strike, "P", "SELL", put.mid)}
+                                                title="Sell Put"
+                                              >
+                                                {put?.bid?.toFixed(2) || "-"}
+                                              </td>
+                                              <td 
+                                                className={`text-right py-1 px-1 cursor-pointer transition-colors ${
+                                                  putBuySelected ? "bg-green-500/40 ring-1 ring-green-400" : "hover:bg-green-500/30"
+                                                } ${putItm && !putBuySelected ? "bg-red-500/10" : ""}`}
+                                                onClick={() => put && addLegToStrategy(selectedExpiry, strike, "P", "BUY", put.mid)}
+                                                title="Buy Put"
+                                              >
+                                                {put?.ask?.toFixed(2) || "-"}
+                                              </td>
+                                            </>
+                                          );
+                                        })()}
                                         <td className={`text-right py-1 px-1 ${putItm ? "bg-red-500/10" : ""}`}>
                                           {put?.last?.toFixed(2) || "-"}
                                         </td>
@@ -1793,7 +1898,7 @@ export function PayoffDashboard() {
                           
                           {selectedExpiry && !optionsChain.calls[selectedExpiry] && !optionsChain.puts[selectedExpiry] && (
                             <div className="text-center text-gray-500 py-8">
-                              No data for this expiration. Prices are fetched for nearest 3 expirations only.
+                              No data for this expiration.
                             </div>
                           )}
                         </div>
@@ -1804,6 +1909,139 @@ export function PayoffDashboard() {
                       )}
                     </CardContent>
                   </Card>
+                  
+                  {/* Strategy Builder Panel */}
+                  {selectedLegs.length > 0 && (
+                    <Card className="bg-slate-950 border-purple-500/30 text-white mt-4">
+                      <CardHeader className="pb-2 border-b border-white/10">
+                        <CardTitle className="text-lg text-purple-400 flex items-center justify-between">
+                          <span>Strategy Builder</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setSelectedLegs([])}
+                            className="text-gray-400 hover:text-white"
+                          >
+                            Clear All
+                          </Button>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-4">
+                        <div className="space-y-2">
+                          {selectedLegs.map((leg, i) => {
+                            const legCost = getLegPrice(leg);
+                            const expDisplay = `${leg.expiry.slice(4,6)}/${leg.expiry.slice(6,8)}`;
+                            return (
+                              <div key={i} className="flex items-center gap-2 bg-white/5 rounded-lg p-2">
+                                {/* Action Toggle */}
+                                <select
+                                  value={leg.action}
+                                  onChange={(e) => updateLeg(i, "action", e.target.value as "BUY" | "SELL")}
+                                  className={`px-2 py-1 rounded text-xs font-medium ${
+                                    leg.action === "BUY" 
+                                      ? "bg-green-500/20 text-green-400 border border-green-500/50" 
+                                      : "bg-red-500/20 text-red-400 border border-red-500/50"
+                                  }`}
+                                >
+                                  <option value="BUY">BUY</option>
+                                  <option value="SELL">SELL</option>
+                                </select>
+                                
+                                {/* Quantity */}
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="100"
+                                  value={leg.quantity}
+                                  onChange={(e) => updateLeg(i, "quantity", parseInt(e.target.value) || 1)}
+                                  className="w-12 px-2 py-1 rounded bg-white/10 border border-white/20 text-white text-xs text-center"
+                                />
+                                
+                                {/* Contract Description */}
+                                <span className="flex-1 text-sm">
+                                  <span className="text-white font-medium">{leg.symbol}</span>
+                                  <span className="text-gray-400 ml-2">{expDisplay}</span>
+                                  <span className="text-white ml-2">${leg.strike}</span>
+                                  <span className={`ml-1 ${leg.right === "C" ? "text-green-400" : "text-red-400"}`}>
+                                    {leg.right === "C" ? "Call" : "Put"}
+                                  </span>
+                                </span>
+                                
+                                {/* Cost */}
+                                <span className={`text-sm font-medium w-24 text-right ${legCost >= 0 ? "text-red-400" : "text-green-400"}`}>
+                                  {legCost >= 0 ? "-" : "+"}${Math.abs(legCost).toFixed(2)}
+                                </span>
+                                
+                                {/* Remove */}
+                                <button
+                                  onClick={() => removeLeg(i)}
+                                  className="text-gray-500 hover:text-red-400 transition-colors"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        
+                        {/* Net Cost and Submit */}
+                        <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="text-sm">
+                              <span className="text-gray-400">Net:</span>
+                              <span className={`ml-2 font-bold text-lg ${netCost >= 0 ? "text-red-400" : "text-green-400"}`}>
+                                {netCost >= 0 ? "Debit " : "Credit "}${Math.abs(netCost).toFixed(2)}
+                              </span>
+                            </div>
+                            
+                            {/* Order Type */}
+                            <select
+                              value={optionsOrderType}
+                              onChange={(e) => setOptionsOrderType(e.target.value as "MARKET" | "LIMIT")}
+                              className="px-2 py-1 rounded bg-white/10 border border-white/20 text-white text-xs"
+                            >
+                              <option value="MARKET">Market</option>
+                              <option value="LIMIT">Limit</option>
+                            </select>
+                            
+                            {optionsOrderType === "LIMIT" && (
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="Limit $"
+                                value={optionsLimitPrice}
+                                onChange={(e) => setOptionsLimitPrice(e.target.value)}
+                                className="w-20 px-2 py-1 rounded bg-white/10 border border-white/20 text-white text-xs"
+                              />
+                            )}
+                          </div>
+                          
+                          <Button
+                            onClick={async () => {
+                              if (selectedLegs.length === 0) return;
+                              setOptionsOrderSubmitting(true);
+                              const result = await placeOptionsOrder({
+                                legs: selectedLegs,
+                                order_type: optionsOrderType,
+                                limit_price: optionsOrderType === "LIMIT" ? parseFloat(optionsLimitPrice) : undefined,
+                              });
+                              setOptionsOrderSubmitting(false);
+                              if (result.success) {
+                                showToast(`Order placed! ${result.message}`, "success");
+                                setSelectedLegs([]);
+                              } else {
+                                showToast(`Order failed: ${result.error}`, "error");
+                              }
+                            }}
+                            disabled={optionsOrderSubmitting || selectedLegs.length === 0}
+                            className="bg-purple-500 hover:bg-purple-600 px-6"
+                          >
+                            {optionsOrderSubmitting ? "Submitting..." : "Place Order"}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </TabsContent>
               </Tabs>
             </div>
