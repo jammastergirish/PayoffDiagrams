@@ -145,15 +145,34 @@ export function PayoffDashboard() {
     });
   }, []);
 
-  const { totalLoadTasks, completedLoadTasks, pendingLoadTasks, loadProgress } = useMemo(() => {
-    const total = Object.keys(loadTasks).length;
-    const completed = Object.values(loadTasks).filter(status => status === "done").length;
+  const { totalLoadTasks, completedLoadTasks, pendingLoadTasks, loadProgress, currentLoadingItem } = useMemo(() => {
+    const entries = Object.entries(loadTasks);
+    const total = entries.length;
+    const completed = entries.filter(([, status]) => status === "done").length;
     const pending = total - completed;
+    
+    // Find the first pending task and parse its key to show what's loading
+    const pendingTasks = entries.filter(([, status]) => status === "pending").map(([key]) => key);
+    let currentItem = "";
+    if (pendingTasks.length > 0) {
+      const key = pendingTasks[0];
+      // Parse keys like "chart:AAPL:1M" or "news:GOOG"
+      const parts = key.split(":");
+      if (parts[0] === "chart") {
+        currentItem = `chart for ${parts[1]}`;
+      } else if (parts[0] === "news") {
+        currentItem = `news for ${parts[1]}`;
+      } else {
+        currentItem = parts.slice(1).join(" ") || key;
+      }
+    }
+    
     return {
       totalLoadTasks: total,
       completedLoadTasks: completed,
       pendingLoadTasks: pending,
       loadProgress: total === 0 ? 0 : completed / total,
+      currentLoadingItem: currentItem,
     };
   }, [loadTasks]);
 
@@ -552,7 +571,7 @@ export function PayoffDashboard() {
             />
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-wider text-gray-500">
-            Loading {completedLoadTasks}/{totalLoadTasks}
+            Loading {currentLoadingItem || ""} {completedLoadTasks}/{totalLoadTasks}
           </div>
         </div>
       )}
