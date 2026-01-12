@@ -49,6 +49,24 @@ async function runWithConcurrency<T>(
   await Promise.all(workers);
 }
 
+// Decode HTML entities like &#39; -> ' and &amp; -> &
+function decodeHtmlEntities(text: string): string {
+  const textarea = typeof document !== 'undefined' ? document.createElement('textarea') : null;
+  if (textarea) {
+    textarea.innerHTML = text;
+    return textarea.value;
+  }
+  // Fallback for SSR - handle common entities
+  return text
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ');
+}
+
 export function PayoffDashboard() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [stockPrices, setStockPrices] = useState<Record<string, number>>({});
@@ -855,7 +873,7 @@ export function PayoffDashboard() {
                                 setSelectedArticle({
                                   articleId: news.articleId,
                                   providerCode: news.providerCode,
-                                  headline: news.headline,
+                                  headline: decodeHtmlEntities(news.headline),
                                   body: news.body || news.teaser,
                                   url: news.url
                                 });
@@ -865,7 +883,7 @@ export function PayoffDashboard() {
                               <div className="flex items-start justify-between gap-4">
                                 <div className="flex-1">
                                   <h3 className="text-sm font-medium text-white group-hover:text-orange-400 transition-colors leading-snug">
-                                    {news.headline}
+                                    {decodeHtmlEntities(news.headline)}
                                   </h3>
                                   <div className="flex items-center gap-3 mt-2">
                                     <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">
