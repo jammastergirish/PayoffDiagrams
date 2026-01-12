@@ -30,7 +30,7 @@ export function NewsModal({ isOpen, onClose, providerCode, articleId, headline, 
     return (
       <div className="space-y-4">
         <div 
-          className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed"
+          className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed prose-p:mb-6 prose-li:mb-2 [&>p]:mb-6 [&_p]:mb-6"
           dangerouslySetInnerHTML={{ __html: articleBody }}
         />
         {articleUrl && (

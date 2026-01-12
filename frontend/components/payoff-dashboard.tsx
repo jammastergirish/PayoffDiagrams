@@ -783,7 +783,13 @@ export function PayoffDashboard() {
                   <Card className="bg-slate-950 border-white/10 text-white">
                     <CardHeader className="flex flex-row items-center justify-end pb-4 border-b border-white/5">
                       <div className="flex gap-1">
-                        {["1H", "1D", "1W", "1M", "1Y"].map(tf => (
+                        {([
+                          { tf: "1H", label: "1H", barSize: "1min" },
+                          { tf: "1D", label: "1D", barSize: "5min" },
+                          { tf: "1W", label: "1W", barSize: "Hourly" },
+                          { tf: "1M", label: "1M", barSize: "Daily" },
+                          { tf: "1Y", label: "1Y", barSize: "Daily" },
+                        ]).map(({ tf, label, barSize }) => (
                           <Button
                             key={tf}
                             variant={chartTimeframe === tf ? "default" : "ghost"}
@@ -792,8 +798,10 @@ export function PayoffDashboard() {
                             className={chartTimeframe === tf 
                               ? "bg-orange-500 hover:bg-orange-600 text-white" 
                               : "text-gray-400 hover:text-white hover:bg-white/10"}
+                            title={`${label} (${barSize} bars)`}
                           >
-                            {tf}
+                            <span>{label}</span>
+                            <span className="ml-1 text-[10px] opacity-60">{barSize}</span>
                           </Button>
                         ))}
                       </div>
