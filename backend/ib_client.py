@@ -208,28 +208,29 @@ class IBClient:
                 # Ensure we are subscribed to live data
                 self._ensure_market_data(contract)
                 
-                # Get latest ticker snapshot
+                # Get latest ticker snapshot - may be None if subscription hasn't populated yet
                 ticker = self.ib.ticker(contract)
                 
-                # If ticker is None (shouldn't happen if contract is valid but good safety)
-                if ticker is None:
-                    print(f"DEBUG: Ticker not found for {contract.symbol} (ConId: {contract.conId})")
-                    continue
-                
-                print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType}")
-
-                current_price = self._safe_float(ticker.marketPrice()) or self._safe_float(ticker.last) or self._safe_float(ticker.close) or 0.0
-                prior_close = self._safe_float(ticker.close)
-                
-                # Greeks extraction
+                # Initialize defaults
+                current_price = 0.0
+                prior_close = 0.0
                 delta, gamma, theta, vega, iv, und_price = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-                if ticker.modelGreeks:
-                    delta = self._safe_float(ticker.modelGreeks.delta)
-                    gamma = self._safe_float(ticker.modelGreeks.gamma)
-                    theta = self._safe_float(ticker.modelGreeks.theta)
-                    vega = self._safe_float(ticker.modelGreeks.vega)
-                    iv = self._safe_float(ticker.modelGreeks.impliedVol)
-                    und_price = self._safe_float(ticker.modelGreeks.undPrice)
+                
+                if ticker is not None:
+                    print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType}")
+                    current_price = self._safe_float(ticker.marketPrice()) or self._safe_float(ticker.last) or self._safe_float(ticker.close) or 0.0
+                    prior_close = self._safe_float(ticker.close)
+                    
+                    # Greeks extraction
+                    if ticker.modelGreeks:
+                        delta = self._safe_float(ticker.modelGreeks.delta)
+                        gamma = self._safe_float(ticker.modelGreeks.gamma)
+                        theta = self._safe_float(ticker.modelGreeks.theta)
+                        vega = self._safe_float(ticker.modelGreeks.vega)
+                        iv = self._safe_float(ticker.modelGreeks.impliedVol)
+                        und_price = self._safe_float(ticker.modelGreeks.undPrice)
+                else:
+                    print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType} (no ticker data yet)")
                 
                 # Fallback for underlying price from live stock ticker if option
                 # If it's an option, we need the underlying price for the diagram
