@@ -172,3 +172,75 @@ export async function fetchNewsArticle(
     }
 }
 
+
+// =====================
+// Watchlist API Functions
+// =====================
+
+export async function fetchWatchlist(): Promise<string[]> {
+    try {
+        const res = await fetch(`${API_BASE}/api/watchlist`);
+        if (!res.ok) throw new Error("Failed to fetch watchlist");
+        const data = await res.json();
+        return data.tickers || [];
+    } catch (e) {
+        console.error(e);
+        return [];
+    }
+}
+
+export async function addToWatchlist(ticker: string): Promise<string[]> {
+    try {
+        const res = await fetch(`${API_BASE}/api/watchlist`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ticker }),
+        });
+        if (!res.ok) throw new Error("Failed to add to watchlist");
+        const data = await res.json();
+        return data.tickers || [];
+    } catch (e) {
+        console.error(e);
+        return [];
+    }
+}
+
+export async function removeFromWatchlist(ticker: string): Promise<string[]> {
+    try {
+        const res = await fetch(`${API_BASE}/api/watchlist/${encodeURIComponent(ticker)}`, {
+            method: "DELETE",
+        });
+        if (!res.ok) throw new Error("Failed to remove from watchlist");
+        const data = await res.json();
+        return data.tickers || [];
+    } catch (e) {
+        console.error(e);
+        return [];
+    }
+}
+
+
+// =====================
+// Daily Snapshot API
+// =====================
+
+export interface DailySnapshot {
+    symbol: string;
+    current_price?: number;
+    previous_close?: number;
+    change?: number;
+    change_pct?: number;
+    error?: string;
+}
+
+export async function fetchDailySnapshot(symbol: string): Promise<DailySnapshot | null> {
+    try {
+        const res = await fetch(`${API_BASE}/api/snapshot/${encodeURIComponent(symbol)}`);
+        if (!res.ok) throw new Error("Failed to fetch snapshot");
+        return await res.json();
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+}
+

@@ -86,6 +86,16 @@ export function CandlestickChart({ data, livePrice, timeframe }: CandlestickChar
     return Math.max(...data.map(d => d.volume));
   }, [data]);
 
+  // Dynamic bar size: fill ~85% of allotted space to minimize gaps
+  const dynamicBarSize = useMemo(() => {
+    // Chart width is roughly 100% minus margins (about 65px for yAxis)
+    const chartWidth = 800; // Approximate usable width
+    const barCount = data.length || 1;
+    const rawBarWidth = chartWidth / barCount;
+    // Use 85% of available space, with min of 4 and max of 20
+    return Math.max(4, Math.min(20, rawBarWidth * 0.85));
+  }, [data.length]);
+
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center h-[400px] text-gray-500">
@@ -178,7 +188,7 @@ export function CandlestickChart({ data, livePrice, timeframe }: CandlestickChar
           {/* Candlestick bodies */}
           <Bar
             dataKey="candleBody"
-            barSize={8}
+            barSize={dynamicBarSize}
             isAnimationActive={false}
           >
             {chartData.map((entry, index) => (
@@ -203,7 +213,7 @@ export function CandlestickChart({ data, livePrice, timeframe }: CandlestickChar
           <Bar
             dataKey="volume"
             isAnimationActive={false}
-            barSize={6}
+            barSize={Math.max(3, dynamicBarSize - 2)}
           >
             {chartData.map((entry, index) => (
               <Cell

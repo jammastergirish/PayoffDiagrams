@@ -18,7 +18,8 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot } from "@/lib/api-client";
+import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
 import { CandlestickChart } from "@/components/candlestick-chart";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
@@ -158,6 +159,11 @@ export function PayoffDashboard() {
 
   // Ticker Details State (company name, logo)
   const [tickerDetailsCache, setTickerDetailsCache] = useState<Record<string, TickerDetails>>({});
+
+  // Watchlist State (custom tickers)
+  const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
+  const [newTickerInput, setNewTickerInput] = useState("");
+  const [snapshotCache, setSnapshotCache] = useState<Record<string, DailySnapshot>>({});
 
   const startLoadTask = useCallback((key: string) => {
     setLoadTasks(prev => {
@@ -510,6 +516,28 @@ export function PayoffDashboard() {
     };
   }, [startLoadTask, completeLoadTask, registerLoadTasks]);
 
+  // Load watchlist from backend
+  useEffect(() => {
+    fetchWatchlist().then(setWatchlistTickers);
+  }, []);
+
+  // Fetch daily snapshots for watchlist tickers
+  useEffect(() => {
+    watchlistTickers.forEach(ticker => {
+      // Only fetch if not already in cache
+      if (!snapshotCache[ticker]) {
+        fetchDailySnapshot(ticker).then(snapshot => {
+          if (snapshot && !snapshot.error) {
+            setSnapshotCache(prev => ({
+              ...prev,
+              [ticker]: snapshot
+            }));
+          }
+        });
+      }
+    });
+  }, [watchlistTickers]);
+
 
 
   const tickers = useMemo(() => {
@@ -518,8 +546,11 @@ export function PayoffDashboard() {
     if (selectedAccount !== 'All') {
         visible = positions.filter(p => p.account === selectedAccount);
     }
-    return Array.from(new Set(visible.map(p => p.ticker))).sort();
-  }, [positions, selectedAccount]);
+    const positionTickers = visible.map(p => p.ticker);
+    // Merge with watchlist, remove duplicates
+    const allTickers = new Set([...positionTickers, ...watchlistTickers]);
+    return Array.from(allTickers).sort();
+  }, [positions, selectedAccount, watchlistTickers]);
 
   // Per-ticker P&L summary (aggregates stock + options)
   const perTickerPnl = useMemo(() => {
@@ -642,15 +673,16 @@ export function PayoffDashboard() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Progress bar - pinned to bottom */}
       {pendingLoadTasks > 0 && (
-        <div className="rounded-full border border-white/5 bg-white/5 px-2 py-1">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-80 rounded-full border border-white/5 bg-black/80 backdrop-blur-sm px-4 py-2">
           <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/10">
             <div
               className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-400 to-emerald-400 transition-all duration-300 ease-out"
               style={{ width: `${Math.max(loadProgress, 0.05) * 100}%` }}
             />
           </div>
-          <div className="mt-1 text-[10px] uppercase tracking-wider text-gray-500">
+          <div className="mt-1 text-[10px] uppercase tracking-wider text-gray-500 text-center">
             Loading {currentLoadingItem || ""} {completedLoadTasks}/{totalLoadTasks}
           </div>
         </div>
@@ -808,7 +840,7 @@ export function PayoffDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 flex-1 min-h-0">
             {/* Sidebar */}
-            <Card className="md:col-span-1 bg-slate-950 border-white/10 text-white flex flex-col max-h-[calc(100vh-320px)]">
+            <Card className="md:col-span-1 bg-slate-950 border-white/10 text-white flex flex-col max-h-[calc(100vh-180px)]">
                <CardHeader className="flex-shrink-0">
                  <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Tickers</CardTitle>
                </CardHeader>
@@ -817,13 +849,18 @@ export function PayoffDashboard() {
                     const pnl = perTickerPnl[t] || { unrealized: 0, daily: 0, stockQty: 0, optionCount: 0 };
                     const hasStock = pnl.stockQty !== 0;
                     const hasOptions = pnl.optionCount > 0;
+                    const hasPositions = hasStock || hasOptions;
+                    const isWatchlistOnly = !hasPositions && watchlistTickers.includes(t);
+                    
                     return (
                       <div 
                         key={t} 
                         className={`p-3 rounded-lg cursor-pointer transition-colors ${
                           selectedTicker === t 
                             ? "bg-orange-500/20 border border-orange-500/50" 
-                            : "bg-white/5 border border-transparent hover:bg-white/10"
+                            : isWatchlistOnly 
+                              ? "bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20"
+                              : "bg-white/5 border border-transparent hover:bg-white/10"
                         }`}
                         onClick={() => setSelectedTicker(t)}
                       >
@@ -853,29 +890,81 @@ export function PayoffDashboard() {
                               </span>
                             )}
                           </div>
-                          <div className="flex gap-1 text-[10px]">
+                          <div className="flex gap-1 text-[10px] items-center">
                             {hasStock && <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{pnl.stockQty > 0 ? '+' : ''}{pnl.stockQty}</span>}
                             {hasOptions && <span className="px-1.5 py-0.5 rounded bg-purple-900/50 text-purple-300">{pnl.optionCount} opt</span>}
+                            {isWatchlistOnly && (
+                              <>
+                                <span className="px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-300">Watchlist</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeFromWatchlist(t).then(setWatchlistTickers);
+                                  }}
+                                  className="ml-1 text-gray-500 hover:text-red-400 text-sm"
+                                  title="Remove from watchlist"
+                                >
+                                  ×
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
-                        <div className="flex justify-between mt-2 text-xs">
-                          <div>
-                            <div className="text-gray-500">Unrealized</div>
-                            <div className={pnl.unrealized >= 0 ? "text-green-400" : "text-red-400"}>
-                              {pnl.unrealized >= 0 ? '+' : ''}{formatCurrency(pnl.unrealized)}
+                        {hasPositions && (
+                          <div className="flex justify-between mt-2 text-xs">
+                            <div>
+                              <div className="text-gray-500">Unrealized</div>
+                              <div className={pnl.unrealized >= 0 ? "text-green-400" : "text-red-400"}>
+                                {pnl.unrealized >= 0 ? '+' : ''}{formatCurrency(pnl.unrealized)}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-gray-500">Today</div>
+                              <div className={pnl.daily >= 0 ? "text-green-400" : "text-red-400"}>
+                                {pnl.daily >= 0 ? '+' : ''}{formatCurrency(pnl.daily)}
+                              </div>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-gray-500">Today</div>
-                            <div className={pnl.daily >= 0 ? "text-green-400" : "text-red-400"}>
-                              {pnl.daily >= 0 ? '+' : ''}{formatCurrency(pnl.daily)}
+                        )}
+                        {/* Watchlist ticker: show daily change % */}
+                        {isWatchlistOnly && snapshotCache[t] && (
+                          <div className="flex justify-between mt-2 text-xs">
+                            <div>
+                              <div className="text-gray-500">Price</div>
+                              <div className="text-white">
+                                ${snapshotCache[t].current_price?.toFixed(2) || '-'}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-gray-500">Today</div>
+                              <div className={(snapshotCache[t].change_pct || 0) >= 0 ? "text-green-400" : "text-red-400"}>
+                                {(snapshotCache[t].change_pct || 0) >= 0 ? '+' : ''}{(snapshotCache[t].change_pct || 0).toFixed(2)}%
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     );
                   })}
                   
+                  {/* Add Ticker Input */}
+                  <div className="mt-2 pt-2 border-t border-white/10">
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      if (newTickerInput.trim()) {
+                        addToWatchlist(newTickerInput.trim()).then(setWatchlistTickers);
+                        setNewTickerInput("");
+                      }
+                    }}>
+                      <Input
+                        type="text"
+                        placeholder="Add ticker..."
+                        value={newTickerInput}
+                        onChange={(e) => setNewTickerInput(e.target.value.toUpperCase())}
+                        className="bg-white/5 border-white/10 text-white placeholder:text-gray-500 h-8 text-xs"
+                      />
+                    </form>
+                  </div>
                </CardContent>
             </Card>
 
@@ -928,7 +1017,7 @@ export function PayoffDashboard() {
                           { tf: "1H", label: "1H", barSize: "1min" },
                           { tf: "1D", label: "1D", barSize: "5min" },
                           { tf: "1W", label: "1W", barSize: "Hourly" },
-                          { tf: "1M", label: "1M", barSize: "Daily" },
+                          { tf: "1M", label: "1M", barSize: "Hourly" },
                           { tf: "1Y", label: "1Y", barSize: "Daily" },
                         ]).map(({ tf, label, barSize }) => (
                           <Button

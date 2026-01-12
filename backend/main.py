@@ -1,8 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from .ib_client import ib_client, PositionModel
-from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article, get_ticker_details
+from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot
 import asyncio
+import json
+from pathlib import Path
 
 from contextlib import asynccontextmanager
 import nest_asyncio
@@ -83,6 +86,17 @@ def get_ticker_info(symbol: str):
     return get_ticker_details(symbol.upper())
 
 
+@app.get("/api/snapshot/{symbol}")
+def get_price_snapshot(symbol: str):
+    """
+    Get current price and daily change for a symbol from Massive.com.
+    
+    Args:
+        symbol: Stock ticker (e.g., AAPL)
+    """
+    return get_daily_snapshot(symbol.upper())
+
+
 @app.get("/api/news/{symbol}")
 def get_news_headlines(symbol: str, limit: int = 15):
     """
@@ -105,3 +119,68 @@ def get_article(article_id: str):
     """
     return massive_get_article(article_id)
 
+
+# ============================================
+# WATCHLIST ENDPOINTS (Custom Tickers)
+# - Stored in watchlist.json in project root
+# ============================================
+
+WATCHLIST_FILE = Path(__file__).parent.parent / "watchlist.json"
+
+
+class WatchlistTicker(BaseModel):
+    ticker: str
+
+
+def _read_watchlist() -> list[str]:
+    """Read watchlist from JSON file."""
+    try:
+        if WATCHLIST_FILE.exists():
+            data = json.loads(WATCHLIST_FILE.read_text())
+            return data.get("tickers", [])
+    except Exception as e:
+        print(f"Error reading watchlist: {e}")
+    return []
+
+
+def _write_watchlist(tickers: list[str]):
+    """Write watchlist to JSON file."""
+    try:
+        WATCHLIST_FILE.write_text(json.dumps({"tickers": tickers}, indent=2))
+    except Exception as e:
+        print(f"Error writing watchlist: {e}")
+
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    """Get all tickers in the watchlist."""
+    return {"tickers": _read_watchlist()}
+
+
+@app.post("/api/watchlist")
+def add_to_watchlist(item: WatchlistTicker):
+    """Add a ticker to the watchlist."""
+    ticker = item.ticker.upper().strip()
+    if not ticker:
+        return {"error": "Ticker cannot be empty"}
+    
+    tickers = _read_watchlist()
+    if ticker not in tickers:
+        tickers.append(ticker)
+        tickers.sort()
+        _write_watchlist(tickers)
+    
+    return {"tickers": tickers}
+
+
+@app.delete("/api/watchlist/{ticker}")
+def remove_from_watchlist(ticker: str):
+    """Remove a ticker from the watchlist."""
+    ticker = ticker.upper().strip()
+    tickers = _read_watchlist()
+    
+    if ticker in tickers:
+        tickers.remove(ticker)
+        _write_watchlist(tickers)
+    
+    return {"tickers": tickers}

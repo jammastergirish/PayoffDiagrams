@@ -31,7 +31,7 @@ else:
 # Maps app timeframes to Massive API parameters
 TIMEFRAME_CONFIG = {
     "1Y": {"multiplier": 1, "timespan": "day", "days_back": 365},
-    "1M": {"multiplier": 1, "timespan": "day", "days_back": 30},
+    "1M": {"multiplier": 1, "timespan": "hour", "days_back": 30},
     "1W": {"multiplier": 1, "timespan": "hour", "days_back": 7},
     "1D": {"multiplier": 5, "timespan": "minute", "days_back": 1},
     "1H": {"multiplier": 1, "timespan": "minute", "days_back": 0, "hours_back": 1},
@@ -120,6 +120,71 @@ def get_historical_bars(symbol: str, timeframe: str = "1M") -> dict:
             "symbol": symbol.upper(),
             "timeframe": timeframe.upper(),
             "bars": [],
+            "error": str(e)
+        }
+
+
+def get_daily_snapshot(symbol: str) -> dict:
+    """
+    Get today's snapshot including current price and daily change.
+    
+    Args:
+        symbol: Stock ticker (e.g., "AAPL")
+        
+    Returns:
+        Dict with current_price, previous_close, change, change_pct
+    """
+    if not _client:
+        return {"error": "Massive API key not configured"}
+    
+    try:
+        # Get previous close from daily aggregates endpoint
+        # We need the previous day's close and today's current price
+        from_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        to_date = datetime.now().strftime("%Y-%m-%d")
+        
+        aggs = _client.get_aggs(
+            ticker=symbol.upper(),
+            multiplier=1,
+            timespan="day",
+            from_=from_date,
+            to=to_date,
+            adjusted=True,
+            sort="desc",
+            limit=2
+        )
+        
+        if aggs and len(aggs) >= 1:
+            # Most recent bar has current price (close), previous bar has prev close
+            current = aggs[0]
+            current_price = float(current.close) if hasattr(current, 'close') else float(current.c) if hasattr(current, 'c') else 0
+            
+            if len(aggs) >= 2:
+                prev = aggs[1]
+                prev_close = float(prev.close) if hasattr(prev, 'close') else float(prev.c) if hasattr(prev, 'c') else 0
+            else:
+                prev_close = float(current.open) if hasattr(current, 'open') else float(current.o) if hasattr(current, 'o') else current_price
+            
+            change = current_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+            
+            return {
+                "symbol": symbol.upper(),
+                "current_price": current_price,
+                "previous_close": prev_close,
+                "change": change,
+                "change_pct": change_pct
+            }
+        
+        return {
+            "symbol": symbol.upper(),
+            "error": "No price data available"
+        }
+        
+    except Exception as e:
+        print(f"ERROR [Massive]: Failed to fetch daily snapshot for {symbol}: {e}")
+        return {
+            "symbol": symbol.upper(),
             "error": str(e)
         }
 
