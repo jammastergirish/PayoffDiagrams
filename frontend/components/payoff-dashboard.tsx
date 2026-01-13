@@ -1438,7 +1438,12 @@ export function PayoffDashboard() {
                               </div>
                             </td>
                             <td className="text-right py-2 px-2 font-mono text-gray-300">
-                              {stockPrices[ticker] ? `$${stockPrices[ticker].toFixed(2)}` : '-'}
+                              {stockPrices[ticker] 
+                                ? `$${stockPrices[ticker].toFixed(2)}` 
+                                : snapshotCache[ticker]?.current_price 
+                                  ? `$${snapshotCache[ticker].current_price!.toFixed(2)}`
+                                  : '-'
+                              }
                             </td>
                           </tr>
                         ))}
