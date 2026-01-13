@@ -179,6 +179,9 @@ export function PayoffDashboard() {
   const [optionsChainLoading, setOptionsChainLoading] = useState(false);
   const [selectedExpiry, setSelectedExpiry] = useState<string>("");
   const [activeTab, setActiveTab] = useState<string>("payoff");
+  
+  // Top-level portfolio view tabs
+  const [portfolioView, setPortfolioView] = useState<"summary" | "detail">("detail");
 
   // Strategy Builder State
   const [selectedLegs, setSelectedLegs] = useState<OptionLeg[]>([]);
@@ -747,6 +750,81 @@ export function PayoffDashboard() {
     return summary;
   }, [positions, selectedAccount]);
 
+  // Comprehensive ticker summaries for Portfolio Summary view
+  const tickerSummaries = useMemo(() => {
+    let visible = positions;
+    if (selectedAccount !== 'All') {
+      visible = positions.filter(p => p.account === selectedAccount);
+    }
+    
+    interface TickerSummary {
+      ticker: string;
+      underlyingPrice: number;
+      unrealizedPnl: number;
+      unrealizedPnlPct: number;
+      dailyPnl: number;
+      dailyPnlPct: number;
+      marketValue: number;
+      costBasis: number;
+      maxLoss: number;
+      maxProfit: number;
+      positionCount: number;
+      hasOptions: boolean;
+    }
+    
+    const grouped: Record<string, { positions: Position[]; costBasis: number; marketValue: number }> = {};
+    
+    for (const p of visible) {
+      if (!grouped[p.ticker]) {
+        grouped[p.ticker] = { positions: [], costBasis: 0, marketValue: 0 };
+      }
+      grouped[p.ticker].positions.push(p);
+      
+      // Calculate cost basis and market value
+      const costBasisValue = (p.cost_basis || 0) * Math.abs(p.qty) * (p.position_type === 'stock' ? 1 : 100);
+      grouped[p.ticker].costBasis += costBasisValue;
+      
+      // Market value estimate
+      const currentPrice = p.current_price || p.cost_basis || 0;
+      const marketVal = currentPrice * Math.abs(p.qty) * (p.position_type === 'stock' ? 1 : 100);
+      grouped[p.ticker].marketValue += p.qty > 0 ? marketVal : -marketVal;
+    }
+    
+    const summaries: TickerSummary[] = [];
+    
+    for (const ticker of Object.keys(grouped)) {
+      const { positions: tickerPositions, costBasis, marketValue } = grouped[ticker];
+      
+      const unrealizedPnl = tickerPositions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+      const dailyPnl = tickerPositions.reduce((sum, p) => sum + (p.daily_pnl || 0), 0);
+      const underlyingPrice = stockPrices[ticker] || tickerPositions[0]?.underlying_price || 0;
+      const hasOptions = tickerPositions.some(p => p.position_type !== 'stock');
+      
+      // Calculate max risk/reward
+      const stats = calculateMaxRiskReward(tickerPositions);
+      
+      summaries.push({
+        ticker,
+        underlyingPrice,
+        unrealizedPnl,
+        unrealizedPnlPct: costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0,
+        dailyPnl,
+        dailyPnlPct: marketValue !== 0 ? (dailyPnl / Math.abs(marketValue)) * 100 : 0,
+        marketValue,
+        costBasis,
+        maxLoss: stats.maxLoss,
+        maxProfit: stats.maxProfit,
+        positionCount: tickerPositions.length,
+        hasOptions,
+      });
+    }
+    
+    // Sort by absolute unrealized P&L descending
+    summaries.sort((a, b) => Math.abs(b.unrealizedPnl) - Math.abs(a.unrealizedPnl));
+    
+    return summaries;
+  }, [positions, selectedAccount, stockPrices]);
+
   const activePositions = useMemo(() => {
     // If no ticker selected, return empty
     if (!selectedTicker) return [];
@@ -1049,6 +1127,160 @@ export function PayoffDashboard() {
         </div>
       </div>
 
+      {/* Portfolio Summary / Detail Tabs */}
+      <Tabs value={portfolioView} onValueChange={(v) => setPortfolioView(v as "summary" | "detail")} className="w-full">
+        <TabsList className="bg-slate-900 border border-white/10">
+          <TabsTrigger value="summary" className="data-[state=active]:bg-white/10 data-[state=active]:text-white">Portfolio Summary</TabsTrigger>
+          <TabsTrigger value="detail" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Portfolio Detail</TabsTrigger>
+        </TabsList>
+        
+        {/* Portfolio Summary Tab */}
+        <TabsContent value="summary" className="mt-4">
+          <Card className="bg-slate-950 border-white/10 text-white">
+            <CardHeader>
+              <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Positions by Ticker</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 text-gray-500 text-xs uppercase tracking-wider">
+                      <th className="text-left py-2 px-2">Ticker</th>
+                      <th className="text-right py-2 px-2">Price</th>
+                      <th className="text-right py-2 px-2">Unrealized $</th>
+                      <th className="text-right py-2 px-2">Unrealized %</th>
+                      <th className="text-right py-2 px-2">Today $</th>
+                      <th className="text-right py-2 px-2">Today %</th>
+                      <th className="text-right py-2 px-2">Market Value</th>
+                      <th className="text-right py-2 px-2">Max Loss</th>
+                      <th className="text-right py-2 px-2">Max Profit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tickerSummaries.map((s) => (
+                      <tr 
+                        key={s.ticker} 
+                        className="border-b border-white/5 hover:bg-white/5 cursor-pointer"
+                        onClick={() => {
+                          setSelectedTicker(s.ticker);
+                          setPortfolioView("detail");
+                        }}
+                      >
+                        <td className="py-2 px-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 flex-shrink-0 rounded bg-white/10 overflow-hidden">
+                              {tickerDetailsCache[s.ticker]?.branding?.icon_url ? (
+                                <img 
+                                  src={tickerDetailsCache[s.ticker].branding!.icon_url!}
+                                  alt={s.ticker}
+                                  className="w-full h-full object-contain"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px] font-bold">
+                                  {s.ticker.slice(0, 2)}
+                                </div>
+                              )}
+                            </div>
+                            <span className="font-medium text-white">{s.ticker}</span>
+                            {s.hasOptions && <span className="text-[10px] text-purple-400 border border-purple-500/30 px-1 rounded">OPT</span>}
+                          </div>
+                        </td>
+                        <td className="text-right py-2 px-2 font-mono text-gray-300">
+                          ${s.underlyingPrice.toFixed(2)}
+                        </td>
+                        <td className={`text-right py-2 px-2 font-mono font-medium ${s.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {s.unrealizedPnl >= 0 ? '+' : ''}${s.unrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className={`text-right py-2 px-2 font-mono text-xs ${s.unrealizedPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {s.unrealizedPnlPct >= 0 ? '+' : ''}{s.unrealizedPnlPct.toFixed(1)}%
+                        </td>
+                        <td className={`text-right py-2 px-2 font-mono font-medium ${s.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {s.dailyPnl >= 0 ? '+' : ''}${s.dailyPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className={`text-right py-2 px-2 font-mono text-xs ${s.dailyPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {s.dailyPnlPct >= 0 ? '+' : ''}{s.dailyPnlPct.toFixed(1)}%
+                        </td>
+                        <td className="text-right py-2 px-2 font-mono text-gray-300">
+                          ${Math.abs(s.marketValue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className="text-right py-2 px-2 font-mono text-red-400">
+                          {Number.isFinite(s.maxLoss) ? `$${Math.abs(s.maxLoss).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
+                        </td>
+                        <td className="text-right py-2 px-2 font-mono text-green-400">
+                          {Number.isFinite(s.maxProfit) ? `$${s.maxProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              {tickerSummaries.length === 0 && (
+                <div className="text-center py-8 text-gray-500">No positions found</div>
+              )}
+            </CardContent>
+          </Card>
+          
+          {/* Watchlist Table */}
+          {watchlistTickers.filter(t => !tickerSummaries.find(s => s.ticker === t)).length > 0 && (
+            <Card className="bg-slate-950 border-white/10 text-white mt-4">
+              <CardHeader>
+                <CardTitle className="text-blue-400 font-normal uppercase tracking-wider text-xs">Watchlist</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10 text-gray-500 text-xs uppercase tracking-wider">
+                        <th className="text-left py-2 px-2">Ticker</th>
+                        <th className="text-right py-2 px-2">Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {watchlistTickers
+                        .filter(t => !tickerSummaries.find(s => s.ticker === t))
+                        .map((ticker) => (
+                          <tr 
+                            key={ticker} 
+                            className="border-b border-white/5 hover:bg-blue-500/10 cursor-pointer"
+                            onClick={() => {
+                              setSelectedTicker(ticker);
+                              setPortfolioView("detail");
+                            }}
+                          >
+                            <td className="py-2 px-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 flex-shrink-0 rounded bg-white/10 overflow-hidden">
+                                  {tickerDetailsCache[ticker]?.branding?.icon_url ? (
+                                    <img 
+                                      src={tickerDetailsCache[ticker].branding!.icon_url!}
+                                      alt={ticker}
+                                      className="w-full h-full object-contain"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px] font-bold">
+                                      {ticker.slice(0, 2)}
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="font-medium text-blue-400">{ticker}</span>
+                              </div>
+                            </td>
+                            <td className="text-right py-2 px-2 font-mono text-gray-300">
+                              {stockPrices[ticker] ? `$${stockPrices[ticker].toFixed(2)}` : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+        
+        {/* Portfolio Detail Tab */}
+        <TabsContent value="detail" className="mt-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 flex-1 min-h-0">
             {/* Sidebar */}
             <Card className="md:col-span-1 bg-slate-950 border-white/10 text-white flex flex-col max-h-[calc(100vh-180px)]">
@@ -2216,8 +2448,10 @@ export function PayoffDashboard() {
                 </TabsContent>
               </Tabs>
             </div>
-         </div>
           </div>
+        </TabsContent>
+      </Tabs>
+        </div>
        )}
 
     </div>
