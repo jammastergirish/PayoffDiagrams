@@ -188,6 +188,9 @@ export function PayoffDashboard() {
   const [sortColumn, setSortColumn] = useState<SortColumn>("unrealizedPnl");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   
+  // Consolidated vs Unconsolidated toggle
+  const [isConsolidated, setIsConsolidated] = useState(true);
+  
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -1169,8 +1172,18 @@ export function PayoffDashboard() {
         {/* Portfolio Summary Tab */}
         <TabsContent value="summary" className="mt-4">
           <Card className="bg-slate-950 border-white/10 text-white">
-            <CardHeader>
-              <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Positions by Ticker</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">
+                {isConsolidated ? "Positions by Ticker" : "All Positions"}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-gray-500">Consolidated</Label>
+                <Switch
+                  checked={isConsolidated}
+                  onCheckedChange={setIsConsolidated}
+                  className="data-[state=checked]:bg-orange-600"
+                />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -1234,60 +1247,141 @@ export function PayoffDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tickerSummaries.map((s) => (
-                      <tr 
-                        key={s.ticker} 
-                        className="border-b border-white/5 hover:bg-white/5 cursor-pointer"
-                        onClick={() => {
-                          setSelectedTicker(s.ticker);
-                          setPortfolioView("detail");
-                        }}
-                      >
-                        <td className="py-2 px-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 flex-shrink-0 rounded bg-white/10 overflow-hidden">
-                              {tickerDetailsCache[s.ticker]?.branding?.icon_url ? (
-                                <img 
-                                  src={tickerDetailsCache[s.ticker].branding!.icon_url!}
-                                  alt={s.ticker}
-                                  className="w-full h-full object-contain"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px] font-bold">
-                                  {s.ticker.slice(0, 2)}
-                                </div>
-                              )}
+                    {isConsolidated ? (
+                      // Consolidated view - by ticker
+                      tickerSummaries.map((s) => (
+                        <tr 
+                          key={s.ticker} 
+                          className="border-b border-white/5 hover:bg-white/5 cursor-pointer"
+                          onClick={() => {
+                            setSelectedTicker(s.ticker);
+                            setPortfolioView("detail");
+                          }}
+                        >
+                          <td className="py-2 px-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 flex-shrink-0 rounded bg-white/10 overflow-hidden">
+                                {tickerDetailsCache[s.ticker]?.branding?.icon_url ? (
+                                  <img 
+                                    src={tickerDetailsCache[s.ticker].branding!.icon_url!}
+                                    alt={s.ticker}
+                                    className="w-full h-full object-contain"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px] font-bold">
+                                    {s.ticker.slice(0, 2)}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="font-medium text-white">{s.ticker}</span>
+                              {s.hasOptions && <span className="text-[10px] text-purple-400 border border-purple-500/30 px-1 rounded">OPT</span>}
                             </div>
-                            <span className="font-medium text-white">{s.ticker}</span>
-                            {s.hasOptions && <span className="text-[10px] text-purple-400 border border-purple-500/30 px-1 rounded">OPT</span>}
-                          </div>
-                        </td>
-                        <td className="text-right py-2 px-2 font-mono text-gray-300">
-                          ${s.underlyingPrice.toFixed(2)}
-                        </td>
-                        <td className={`text-right py-2 px-2 font-mono font-medium ${s.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {s.unrealizedPnl >= 0 ? '+' : ''}${s.unrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                        </td>
-                        <td className={`text-right py-2 px-2 font-mono text-xs ${s.unrealizedPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {s.unrealizedPnlPct >= 0 ? '+' : ''}{s.unrealizedPnlPct.toFixed(1)}%
-                        </td>
-                        <td className={`text-right py-2 px-2 font-mono font-medium ${s.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {s.dailyPnl >= 0 ? '+' : ''}${s.dailyPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                        </td>
-                        <td className={`text-right py-2 px-2 font-mono text-xs ${s.dailyPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {s.dailyPnlPct >= 0 ? '+' : ''}{s.dailyPnlPct.toFixed(1)}%
-                        </td>
-                        <td className="text-right py-2 px-2 font-mono text-gray-300">
-                          ${Math.abs(s.marketValue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                        </td>
-                        <td className="text-right py-2 px-2 font-mono text-red-400">
-                          {Number.isFinite(s.maxLoss) ? `$${Math.abs(s.maxLoss).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
-                        </td>
-                        <td className="text-right py-2 px-2 font-mono text-green-400">
-                          {Number.isFinite(s.maxProfit) ? `$${s.maxProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="text-right py-2 px-2 font-mono text-gray-300">
+                            ${s.underlyingPrice.toFixed(2)}
+                          </td>
+                          <td className={`text-right py-2 px-2 font-mono font-medium ${s.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {s.unrealizedPnl >= 0 ? '+' : ''}${s.unrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </td>
+                          <td className={`text-right py-2 px-2 font-mono text-xs ${s.unrealizedPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {s.unrealizedPnlPct >= 0 ? '+' : ''}{s.unrealizedPnlPct.toFixed(1)}%
+                          </td>
+                          <td className={`text-right py-2 px-2 font-mono font-medium ${s.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {s.dailyPnl >= 0 ? '+' : ''}${s.dailyPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </td>
+                          <td className={`text-right py-2 px-2 font-mono text-xs ${s.dailyPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {s.dailyPnlPct >= 0 ? '+' : ''}{s.dailyPnlPct.toFixed(1)}%
+                          </td>
+                          <td className="text-right py-2 px-2 font-mono text-gray-300">
+                            ${Math.abs(s.marketValue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </td>
+                          <td className="text-right py-2 px-2 font-mono text-red-400">
+                            {Number.isFinite(s.maxLoss) ? `$${Math.abs(s.maxLoss).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
+                          </td>
+                          <td className="text-right py-2 px-2 font-mono text-green-400">
+                            {Number.isFinite(s.maxProfit) ? `$${s.maxProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      // Unconsolidated view - individual positions
+                      positions
+                        .filter(p => selectedAccount === "All" || p.account === selectedAccount)
+                        .sort((a, b) => {
+                          const aVal = a.unrealized_pnl || 0;
+                          const bVal = b.unrealized_pnl || 0;
+                          return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
+                        })
+                        .map((p, idx) => {
+                          const costBasis = (p.cost_basis || 0) * Math.abs(p.qty) * (p.position_type === 'stock' ? 1 : 100);
+                          const unrealizedPct = costBasis > 0 ? ((p.unrealized_pnl || 0) / costBasis) * 100 : 0;
+                          const currentPrice = p.current_price || p.cost_basis || 0;
+                          const marketValue = currentPrice * Math.abs(p.qty) * (p.position_type === 'stock' ? 1 : 100);
+                          const dailyPct = marketValue > 0 ? ((p.daily_pnl || 0) / marketValue) * 100 : 0;
+                          
+                          return (
+                            <tr 
+                              key={`${p.ticker}-${p.position_type}-${p.strike || 0}-${p.expiry || ''}-${idx}`}
+                              className="border-b border-white/5 hover:bg-white/5 cursor-pointer"
+                              onClick={() => {
+                                setSelectedTicker(p.ticker);
+                                setPortfolioView("detail");
+                              }}
+                            >
+                              <td className="py-2 px-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 flex-shrink-0 rounded bg-white/10 overflow-hidden">
+                                    {tickerDetailsCache[p.ticker]?.branding?.icon_url ? (
+                                      <img 
+                                        src={tickerDetailsCache[p.ticker].branding!.icon_url!}
+                                        alt={p.ticker}
+                                        className="w-full h-full object-contain"
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px] font-bold">
+                                        {p.ticker.slice(0, 2)}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <span className="font-medium text-white">{p.ticker}</span>
+                                    <span className="text-[10px] text-gray-500">
+                                      {p.position_type === 'stock' 
+                                        ? `${p.qty > 0 ? 'Long' : 'Short'} ${Math.abs(p.qty)} shares`
+                                        : `${p.qty > 0 ? 'Long' : 'Short'} ${Math.abs(p.qty)} ${p.position_type.toUpperCase()} $${p.strike} ${p.expiry}`
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono text-gray-300">
+                                ${(stockPrices[p.ticker] || p.underlying_price || 0).toFixed(2)}
+                              </td>
+                              <td className={`text-right py-2 px-2 font-mono font-medium ${(p.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {(p.unrealized_pnl || 0) >= 0 ? '+' : ''}${(p.unrealized_pnl || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className={`text-right py-2 px-2 font-mono text-xs ${unrealizedPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {unrealizedPct >= 0 ? '+' : ''}{unrealizedPct.toFixed(1)}%
+                              </td>
+                              <td className={`text-right py-2 px-2 font-mono font-medium ${(p.daily_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {(p.daily_pnl || 0) >= 0 ? '+' : ''}${(p.daily_pnl || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className={`text-right py-2 px-2 font-mono text-xs ${dailyPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {dailyPct >= 0 ? '+' : ''}{dailyPct.toFixed(1)}%
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono text-gray-300">
+                                ${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono text-gray-500">
+                                -
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono text-gray-500">
+                                -
+                              </td>
+                            </tr>
+                          );
+                        })
+                    )}
                   </tbody>
                 </table>
               </div>
