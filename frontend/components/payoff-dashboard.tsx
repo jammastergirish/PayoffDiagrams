@@ -316,9 +316,25 @@ export function PayoffDashboard() {
     });
   }, [optionsChain]);
 
+  const startLoadTask = useCallback((key: string) => {
+    setLoadTasks(prev => {
+      if (prev[key] === "pending") return prev;
+      return { ...prev, [key]: "pending" };
+    });
+  }, []);
+
+  const completeLoadTask = useCallback((key: string) => {
+    setLoadTasks(prev => {
+      if (!prev[key] || prev[key] === "done") return prev;
+      return { ...prev, [key]: "done" };
+    });
+  }, []);
+
   // Auto-load options chain when switching to options tab or changing ticker
   const loadOptionsChain = useCallback(async (ticker: string, forceRefresh = false) => {
     if (!ticker || (optionsChainLoading && !forceRefresh)) return;
+
+    const taskKey = `options:${ticker}`;
 
     // Show cached data immediately if available
     if (!forceRefresh && optionsChainCacheRef.current[ticker]) {
@@ -330,22 +346,28 @@ export function PayoffDashboard() {
     }
 
     setOptionsChainLoading(true);
-    const chain = await fetchOptionsChain(ticker);
+    startLoadTask(taskKey);
 
-    // Update cache
-    if (chain && !chain.error) {
-      optionsChainCacheRef.current[ticker] = chain;
-    }
+    try {
+      const chain = await fetchOptionsChain(ticker);
 
-    setOptionsChain(chain);
-    if (chain.expirations.length > 0) {
-      // Preserve selected expiry if it still exists, otherwise select first
-      if (!chain.expirations.includes(selectedExpiry)) {
-        setSelectedExpiry(chain.expirations[0]);
+      // Update cache
+      if (chain && !chain.error) {
+        optionsChainCacheRef.current[ticker] = chain;
       }
+
+      setOptionsChain(chain);
+      if (chain.expirations.length > 0) {
+        // Preserve selected expiry if it still exists, otherwise select first
+        if (!chain.expirations.includes(selectedExpiry)) {
+          setSelectedExpiry(chain.expirations[0]);
+        }
+      }
+    } finally {
+      setOptionsChainLoading(false);
+      completeLoadTask(taskKey);
     }
-    setOptionsChainLoading(false);
-  }, [optionsChainLoading, selectedExpiry]);
+  }, [optionsChainLoading, selectedExpiry, startLoadTask, completeLoadTask]);
 
   // Handle ticker changes
   useEffect(() => {
@@ -370,21 +392,6 @@ export function PayoffDashboard() {
       loadOptionsChain(selectedTicker);
     }
   }, [selectedTicker]); // eslint-disable-line react-hooks/exhaustive-deps
-
-
-  const startLoadTask = useCallback((key: string) => {
-    setLoadTasks(prev => {
-      if (prev[key] === "pending") return prev;
-      return { ...prev, [key]: "pending" };
-    });
-  }, []);
-
-  const completeLoadTask = useCallback((key: string) => {
-    setLoadTasks(prev => {
-      if (!prev[key] || prev[key] === "done") return prev;
-      return { ...prev, [key]: "done" };
-    });
-  }, []);
 
   const registerLoadTasks = useCallback((keys: string[]) => {
     if (keys.length === 0) return;
@@ -2254,7 +2261,7 @@ export function PayoffDashboard() {
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-lg text-purple-400">Options Chain</CardTitle>
                         <div className="flex items-center gap-2">
-                          {optionsChain && (optionsChain as any).cached && (
+                          {optionsChain && (optionsChain as any).cached && !optionsChainLoading && (
                             <span className="text-xs text-yellow-400">
                               Cached ({Math.floor((optionsChain as any).cache_age_seconds || 0)}s ago)
                             </span>
@@ -2262,17 +2269,10 @@ export function PayoffDashboard() {
                           <Button
                             size="sm"
                             onClick={() => loadOptionsChain(selectedTicker || "", true)}
-                            disabled={!selectedTicker}
-                            className={optionsChainLoading ? "bg-purple-400" : "bg-purple-500 hover:bg-purple-600"}
+                            disabled={!selectedTicker || optionsChainLoading}
+                            className="bg-purple-500 hover:bg-purple-600 disabled:bg-purple-400 disabled:cursor-not-allowed"
                           >
-                            {optionsChainLoading ? (
-                              <span className="flex items-center gap-2">
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                                Updating...
-                              </span>
-                            ) : (
-                              "Refresh"
-                            )}
+                            Refresh
                           </Button>
                         </div>
                       </div>
