@@ -182,6 +182,20 @@ export function PayoffDashboard() {
   
   // Top-level portfolio view tabs
   const [portfolioView, setPortfolioView] = useState<"summary" | "detail">("detail");
+  
+  // Portfolio Summary sort state
+  type SortColumn = "ticker" | "underlyingPrice" | "unrealizedPnl" | "unrealizedPnlPct" | "dailyPnl" | "dailyPnlPct" | "marketValue" | "maxLoss" | "maxProfit";
+  const [sortColumn, setSortColumn] = useState<SortColumn>("unrealizedPnl");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortDirection("desc");
+    }
+  };
 
   // Strategy Builder State
   const [selectedLegs, setSelectedLegs] = useState<OptionLeg[]>([]);
@@ -819,11 +833,29 @@ export function PayoffDashboard() {
       });
     }
     
-    // Sort by absolute unrealized P&L descending
-    summaries.sort((a, b) => Math.abs(b.unrealizedPnl) - Math.abs(a.unrealizedPnl));
+    // Sort by selected column
+    summaries.sort((a, b) => {
+      let aVal: number | string = a[sortColumn];
+      let bVal: number | string = b[sortColumn];
+      
+      // Handle string comparison for ticker
+      if (sortColumn === "ticker") {
+        return sortDirection === "asc" 
+          ? (aVal as string).localeCompare(bVal as string)
+          : (bVal as string).localeCompare(aVal as string);
+      }
+      
+      // Handle infinity values for maxLoss/maxProfit
+      if (!Number.isFinite(aVal)) aVal = sortDirection === "asc" ? Infinity : -Infinity;
+      if (!Number.isFinite(bVal)) bVal = sortDirection === "asc" ? Infinity : -Infinity;
+      
+      return sortDirection === "asc" 
+        ? (aVal as number) - (bVal as number)
+        : (bVal as number) - (aVal as number);
+    });
     
     return summaries;
-  }, [positions, selectedAccount, stockPrices]);
+  }, [positions, selectedAccount, stockPrices, sortColumn, sortDirection]);
 
   const activePositions = useMemo(() => {
     // If no ticker selected, return empty
@@ -1145,15 +1177,60 @@ export function PayoffDashboard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/10 text-gray-500 text-xs uppercase tracking-wider">
-                      <th className="text-left py-2 px-2">Ticker</th>
-                      <th className="text-right py-2 px-2">Price</th>
-                      <th className="text-right py-2 px-2">Unrealized $</th>
-                      <th className="text-right py-2 px-2">Unrealized %</th>
-                      <th className="text-right py-2 px-2">Today $</th>
-                      <th className="text-right py-2 px-2">Today %</th>
-                      <th className="text-right py-2 px-2">Market Value</th>
-                      <th className="text-right py-2 px-2">Max Loss</th>
-                      <th className="text-right py-2 px-2">Max Profit</th>
+                      <th 
+                        className="text-left py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("ticker")}
+                      >
+                        Ticker {sortColumn === "ticker" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("underlyingPrice")}
+                      >
+                        Price {sortColumn === "underlyingPrice" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("unrealizedPnl")}
+                      >
+                        Unrealized $ {sortColumn === "unrealizedPnl" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("unrealizedPnlPct")}
+                      >
+                        Unrealized % {sortColumn === "unrealizedPnlPct" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("dailyPnl")}
+                      >
+                        Today $ {sortColumn === "dailyPnl" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("dailyPnlPct")}
+                      >
+                        Today % {sortColumn === "dailyPnlPct" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("marketValue")}
+                      >
+                        Market Value {sortColumn === "marketValue" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("maxLoss")}
+                      >
+                        Max Loss {sortColumn === "maxLoss" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
+                      <th 
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSort("maxProfit")}
+                      >
+                        Max Profit {sortColumn === "maxProfit" && (sortDirection === "asc" ? "↑" : "↓")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
