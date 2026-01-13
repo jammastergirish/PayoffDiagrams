@@ -486,7 +486,9 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
             
             # Get expiration and strike
             expiry = str(details.expiration_date) if hasattr(details, 'expiration_date') else None
-            strike = float(details.strike_price) if hasattr(details, 'strike_price') else None
+            # Round strike to 2 decimal places to avoid floating point comparison issues
+            strike_raw = float(details.strike_price) if hasattr(details, 'strike_price') else None
+            strike = round(strike_raw, 2) if strike_raw is not None else None
             contract_type = str(details.contract_type).upper() if hasattr(details, 'contract_type') else None
 
             if not expiry or strike is None or contract_type not in ['CALL', 'PUT', 'C', 'P']:
@@ -496,10 +498,11 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
             if strike_range and (strike < strike_range[0] or strike > strike_range[1]):
                 continue  # Skip this contract early
             
+            
             expirations_set.add(expiry)
             strikes_set.add(strike)
             
-            # Extract day snapshot data (this is where prices are!)
+            # Extract day snapshot data (this is where today's prices are!)
             day = opt.day if hasattr(opt, 'day') else None
             
             # Prices from day snapshot
@@ -510,18 +513,35 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
             vwap = float(day.vwap) if day and hasattr(day, 'vwap') and day.vwap else 0.0
             volume = int(day.volume) if day and hasattr(day, 'volume') and day.volume else 0
             
-            # Use close price as "last", and approximate bid/ask from high/low
-            last = close_price
-            # For approximate bid/ask, use close price (delayed data doesn't have live bid/ask)
-            bid = close_price  # Approximate
-            ask = close_price  # Approximate
-            mid = close_price
+            # Extract last_trade for options that haven't traded today but have historical trades
+            last_trade = opt.last_trade if hasattr(opt, 'last_trade') else None
+            last_trade_price = float(last_trade.price) if last_trade and hasattr(last_trade, 'price') and last_trade.price else 0.0
             
-            # If we have high/low, use them for a rough bid/ask spread
-            if high_price > 0 and low_price > 0 and high_price != low_price:
+            # Extract last_quote for bid/ask (more reliable than day high/low)
+            last_quote = opt.last_quote if hasattr(opt, 'last_quote') else None
+            quote_bid = float(last_quote.bid) if last_quote and hasattr(last_quote, 'bid') and last_quote.bid else 0.0
+            quote_ask = float(last_quote.ask) if last_quote and hasattr(last_quote, 'ask') and last_quote.ask else 0.0
+            
+            # Use close price as "last", falling back to last_trade_price
+            last = close_price if close_price > 0 else last_trade_price
+            
+            # For bid/ask: prefer last_quote, then day high/low, then close price
+            if quote_bid > 0 and quote_ask > 0:
+                bid = quote_bid
+                ask = quote_ask
+                mid = (quote_bid + quote_ask) / 2
+            elif high_price > 0 and low_price > 0 and high_price != low_price:
                 bid = low_price
                 ask = high_price
                 mid = (high_price + low_price) / 2
+            elif last > 0:
+                bid = last
+                ask = last
+                mid = last
+            else:
+                bid = 0.0
+                ask = 0.0
+                mid = 0.0
             
             # Extract greeks
             greeks = opt.greeks if hasattr(opt, 'greeks') else None
@@ -580,7 +600,8 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
         else:
             strikes = all_strikes[:max_strikes] if len(all_strikes) > max_strikes else all_strikes
         
-        strikes_set_filtered = set(strikes)
+        # Round strikes in filtered set for consistent comparison
+        strikes_set_filtered = set(round(s, 2) for s in strikes)
         
         # Build calls and puts dictionaries
         calls = {}  # expiry -> strike -> quote
@@ -588,7 +609,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
         
         for contract in all_contracts:
             exp = contract["expiration"]
-            strike = contract["strike"]
+            strike = round(contract["strike"], 2)  # Ensure consistent rounding for comparison
             
             # Skip strikes outside our filtered range
             if strike not in strikes_set_filtered:
@@ -610,14 +631,17 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
                 "vega": contract["vega"],
             }
             
+            # Use string key for consistent JSON serialization
+            strike_key = str(strike)
+            
             if contract["type"] == "C":
                 if exp not in calls:
                     calls[exp] = {}
-                calls[exp][strike] = quote
+                calls[exp][strike_key] = quote
             else:
                 if exp not in puts:
                     puts[exp] = {}
-                puts[exp][strike] = quote
+                puts[exp][strike_key] = quote
         
         # Filter expirations to only those that have actual data
         expirations_with_data = [exp for exp in expirations if exp in calls or exp in puts]

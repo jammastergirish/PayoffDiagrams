@@ -69,6 +69,37 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&nbsp;/g, ' ');
 }
 
+// Convert strike number to string key that matches backend JSON serialization
+// Python's str(50.0) = "50.0", str(50.5) = "50.5"
+// JavaScript's String(50.0) = "50", String(50.5) = "50.5"
+// We need to try multiple formats to find the match
+function getStrikeQuote(
+  chainData: Record<string, Record<string, unknown>> | undefined,
+  expiry: string,
+  strike: number
+): unknown {
+  if (!chainData?.[expiry]) return undefined;
+  const data = chainData[expiry];
+  
+  // Try direct number key (won't work for integers due to JS string coercion)
+  if (data[strike] !== undefined) return data[strike];
+  
+  // Try JavaScript's String(strike) - works for 50.5 -> "50.5", but 50.0 -> "50"
+  const jsKey = String(strike);
+  if (data[jsKey] !== undefined) return data[jsKey];
+  
+  // Try Python's str() format: 50.0 -> "50.0" (keeps one decimal place for integers)
+  // This is the key format the backend now uses
+  const pyKey = Number.isInteger(strike) ? `${strike}.0` : String(strike);
+  if (data[pyKey] !== undefined) return data[pyKey];
+  
+  // Try toFixed(2) format: 50 -> "50.00"
+  const fixedKey = strike.toFixed(2);
+  if (data[fixedKey] !== undefined) return data[fixedKey];
+  
+  return undefined;
+}
+
 // Format date as YYYY-MM-DD
 function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
@@ -264,8 +295,8 @@ export function PayoffDashboard() {
       : leg.expiry;
     
     const quote = leg.right === "C" 
-      ? (optionsChain.calls[leg.expiry]?.[leg.strike] || optionsChain.calls[expiryWithDashes]?.[leg.strike])
-      : (optionsChain.puts[leg.expiry]?.[leg.strike] || optionsChain.puts[expiryWithDashes]?.[leg.strike]);
+      ? (getStrikeQuote(optionsChain.calls, leg.expiry, leg.strike) || getStrikeQuote(optionsChain.calls, expiryWithDashes, leg.strike)) as OptionQuote | undefined
+      : (getStrikeQuote(optionsChain.puts, leg.expiry, leg.strike) || getStrikeQuote(optionsChain.puts, expiryWithDashes, leg.strike)) as OptionQuote | undefined;
     if (!quote) return 0;
     const mid = quote.mid || quote.last || 0;
     // BUY = pay (positive), SELL = receive (negative)
@@ -297,8 +328,8 @@ export function PayoffDashboard() {
       // Get the quote for pricing
       const expiryWithDashes = `${leg.expiry.slice(0,4)}-${leg.expiry.slice(4,6)}-${leg.expiry.slice(6,8)}`;
       const quote = leg.right === "C"
-        ? (optionsChain.calls[leg.expiry]?.[leg.strike] || optionsChain.calls[expiryWithDashes]?.[leg.strike])
-        : (optionsChain.puts[leg.expiry]?.[leg.strike] || optionsChain.puts[expiryWithDashes]?.[leg.strike]);
+        ? (getStrikeQuote(optionsChain.calls, leg.expiry, leg.strike) || getStrikeQuote(optionsChain.calls, expiryWithDashes, leg.strike)) as OptionQuote | undefined
+        : (getStrikeQuote(optionsChain.puts, leg.expiry, leg.strike) || getStrikeQuote(optionsChain.puts, expiryWithDashes, leg.strike)) as OptionQuote | undefined;
       
       const mid = quote?.mid || quote?.last || 0;
       // BUY = positive qty, SELL = negative qty
@@ -2339,8 +2370,8 @@ export function PayoffDashboard() {
                                 </thead>
                                 <tbody>
                                   {optionsChain.strikes.map(strike => {
-                                    const call = optionsChain.calls[selectedExpiry]?.[strike];
-                                    const put = optionsChain.puts[selectedExpiry]?.[strike];
+                                    const call = getStrikeQuote(optionsChain.calls, selectedExpiry, strike) as OptionQuote | undefined;
+                                    const put = getStrikeQuote(optionsChain.puts, selectedExpiry, strike) as OptionQuote | undefined;
                                     const isAtm = Math.abs(strike - optionsChain.underlying_price) < (optionsChain.underlying_price * 0.02);
                                     const callItm = strike < optionsChain.underlying_price;
                                     const putItm = strike > optionsChain.underlying_price;
