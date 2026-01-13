@@ -1257,37 +1257,37 @@ export function PayoffDashboard() {
                         Ticker {sortColumn === "ticker" && (sortDirection === "asc" ? "↑" : "↓")}
                       </th>
                       <th 
-                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors border-l border-r border-white/10"
                         onClick={() => handleSort("underlyingPrice")}
                       >
                         Price {sortColumn === "underlyingPrice" && (sortDirection === "asc" ? "↑" : "↓")}
                       </th>
                       <th 
-                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors border-l border-white/10"
                         onClick={() => handleSort("unrealizedPnl")}
                       >
                         Unrealized $ {sortColumn === "unrealizedPnl" && (sortDirection === "asc" ? "↑" : "↓")}
                       </th>
                       <th 
-                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors border-r border-white/10"
                         onClick={() => handleSort("unrealizedPnlPct")}
                       >
                         Unrealized % {sortColumn === "unrealizedPnlPct" && (sortDirection === "asc" ? "↑" : "↓")}
                       </th>
                       <th 
-                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors border-l border-white/10"
                         onClick={() => handleSort("dailyPnl")}
                       >
                         Today $ {sortColumn === "dailyPnl" && (sortDirection === "asc" ? "↑" : "↓")}
                       </th>
                       <th 
-                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors border-r border-white/10"
                         onClick={() => handleSort("dailyPnlPct")}
                       >
                         Today % {sortColumn === "dailyPnlPct" && (sortDirection === "asc" ? "↑" : "↓")}
                       </th>
                       <th 
-                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
+                        className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors border-l border-r border-white/10"
                         onClick={() => handleSort("marketValue")}
                       >
                         Market Value {sortColumn === "marketValue" && (sortDirection === "asc" ? "↑" : "↓")}
@@ -1337,22 +1337,22 @@ export function PayoffDashboard() {
                               {s.hasOptions && <span className="text-[10px] text-purple-400 border border-purple-500/30 px-1 rounded">OPT</span>}
                             </div>
                           </td>
-                          <td className="text-right py-2 px-2 font-mono text-gray-300">
+                          <td className="text-right py-2 px-2 font-mono text-gray-300 border-l border-r border-white/10">
                             ${s.underlyingPrice.toFixed(2)}
                           </td>
-                          <td className={`text-right py-2 px-2 font-mono font-medium ${s.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${s.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.unrealizedPnl >= 0 ? '+' : ''}${s.unrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                           </td>
-                          <td className={`text-right py-2 px-2 font-mono text-xs ${s.unrealizedPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${s.unrealizedPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.unrealizedPnlPct >= 0 ? '+' : ''}{s.unrealizedPnlPct.toFixed(1)}%
                           </td>
-                          <td className={`text-right py-2 px-2 font-mono font-medium ${s.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${s.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.dailyPnl >= 0 ? '+' : ''}${s.dailyPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                           </td>
-                          <td className={`text-right py-2 px-2 font-mono text-xs ${s.dailyPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${s.dailyPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.dailyPnlPct >= 0 ? '+' : ''}{s.dailyPnlPct.toFixed(1)}%
                           </td>
-                          <td className="text-right py-2 px-2 font-mono text-gray-300">
+                          <td className="text-right py-2 px-2 font-mono text-gray-300 border-l border-r border-white/10">
                             ${Math.abs(s.marketValue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                           </td>
                           <td className="text-right py-2 px-2 font-mono text-red-400">
@@ -1414,22 +1414,22 @@ export function PayoffDashboard() {
                                   </div>
                                 </div>
                               </td>
-                              <td className="text-right py-2 px-2 font-mono text-gray-300">
+                              <td className="text-right py-2 px-2 font-mono text-gray-300 border-l border-r border-white/10">
                                 ${(stockPrices[p.ticker] || p.underlying_price || 0).toFixed(2)}
                               </td>
-                              <td className={`text-right py-2 px-2 font-mono font-medium ${(p.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${(p.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {(p.unrealized_pnl || 0) >= 0 ? '+' : ''}${(p.unrealized_pnl || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                               </td>
-                              <td className={`text-right py-2 px-2 font-mono text-xs ${unrealizedPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${unrealizedPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {unrealizedPct >= 0 ? '+' : ''}{unrealizedPct.toFixed(1)}%
                               </td>
-                              <td className={`text-right py-2 px-2 font-mono font-medium ${(p.daily_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${(p.daily_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {(p.daily_pnl || 0) >= 0 ? '+' : ''}${(p.daily_pnl || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                               </td>
-                              <td className={`text-right py-2 px-2 font-mono text-xs ${dailyPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${dailyPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {dailyPct >= 0 ? '+' : ''}{dailyPct.toFixed(1)}%
                               </td>
-                              <td className="text-right py-2 px-2 font-mono text-gray-300">
+                              <td className="text-right py-2 px-2 font-mono text-gray-300 border-l border-r border-white/10">
                                 ${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                               </td>
                               <td className="text-right py-2 px-2 font-mono text-gray-500">
