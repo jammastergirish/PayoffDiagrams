@@ -130,10 +130,11 @@ export function PayoffChart({
               type="monotone"
               dataKey="stockPnl"
               name="Stock Only"
-              stroke="#334155" // Slate 700
+              stroke="#334155"
               strokeWidth={2}
               dot={false}
               strokeDasharray="5 5"
+              isAnimationActive={false}
             />
           )}
 
@@ -142,10 +143,11 @@ export function PayoffChart({
               type="monotone"
               dataKey="optionsPnl"
               name="Options Only"
-              stroke="#A855F7" // Purple 500
+              stroke="#A855F7"
               strokeWidth={2}
               dot={false}
               strokeDasharray="5 5"
+              isAnimationActive={false}
             />
           )}
 
@@ -154,10 +156,11 @@ export function PayoffChart({
               type="monotone"
               dataKey="pnl"
               name="Combined P&L"
-              stroke="#F97316" // Orange 500
+              stroke="#F97316"
               strokeWidth={3}
               dot={false}
               activeDot={{ r: 6, fill: "#F97316", stroke: "#fff" }}
+              isAnimationActive={false}
             />
           )}
 
@@ -166,10 +169,11 @@ export function PayoffChart({
                 type="monotone"
                 dataKey="t0Pnl"
                 name="T+0 (Sim)"
-                stroke="#06b6d4" // Cyan 500
+                stroke="#06b6d4"
                 strokeWidth={2}
                 dot={false}
                 strokeDasharray="4 4"
+                isAnimationActive={false}
             />
           )}
         </LineChart>

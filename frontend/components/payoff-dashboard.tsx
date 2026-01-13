@@ -2518,6 +2518,7 @@ export function PayoffDashboard() {
                                     strokeWidth={2} 
                                     dot={false}
                                     name="Strategy"
+                                    isAnimationActive={false}
                                   />
                                   {showExistingPositions && (
                                     <Line 
@@ -2527,6 +2528,7 @@ export function PayoffDashboard() {
                                       strokeWidth={2} 
                                       dot={false}
                                       name="Combined"
+                                      isAnimationActive={false}
                                     />
                                   )}
                                 </LineChart>
