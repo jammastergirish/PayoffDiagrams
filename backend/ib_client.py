@@ -2,6 +2,7 @@ import asyncio
 import threading
 from typing import Optional, List, Literal
 from dataclasses import dataclass
+from datetime import datetime
 from ib_insync import IB, Stock, Option, MarketOrder, LimitOrder, util
 import math
 import nest_asyncio
@@ -222,6 +223,12 @@ class IBClient:
                     prior_close = self._safe_float(ticker.close)
                     
                     # Greeks extraction
+                    # IBKR provides Greeks in standard format:
+                    # - Delta: change in option price per $1 move in underlying (already scaled per contract)
+                    # - Gamma: change in delta per $1 move in underlying
+                    # - Theta: daily time decay in dollars (negative for long positions)
+                    # - Vega: change in option price per 1% change in IV
+                    # - IV: Implied Volatility as decimal (0.30 = 30%)
                     if ticker.modelGreeks:
                         delta = self._safe_float(ticker.modelGreeks.delta)
                         gamma = self._safe_float(ticker.modelGreeks.gamma)
@@ -255,14 +262,15 @@ class IBClient:
                      else:
                          und_price = found_price
 
-                # Calculate Daily P&L Manually
-                # (Mark - Prior Close) * Qty * Multiplier
-                # Multiplier is usually 1 for STK, 100 for OPT
+                # Calculate Daily P&L
+                # For stocks: (current_price - prior_close) * qty
+                # For options: (current_mark - prior_close_mark) * qty * 100
+                # Note: IBKR option prices are per share, so $1.50 means the contract costs $150
                 if contract.secType == 'OPT':
                     multiplier = 100.0
                 else:
                     multiplier = 1.0
-                
+
                 pos_daily_pnl = 0.0
                 if current_price > 0 and prior_close > 0:
                     pos_daily_pnl = (current_price - prior_close) * self._safe_float(pos.position) * multiplier
@@ -282,7 +290,14 @@ class IBClient:
                     })
                 
                 elif contract.secType == 'OPT':
-                    expiry_formatted = f"{contract.lastTradeDateOrContractMonth[:4]}-{contract.lastTradeDateOrContractMonth[4:6]}-{contract.lastTradeDateOrContractMonth[6:]}"
+                    # Parse expiry date properly using datetime
+                    # IBKR format is YYYYMMDD
+                    try:
+                        expiry_date = datetime.strptime(contract.lastTradeDateOrContractMonth[:8], '%Y%m%d')
+                        expiry_formatted = expiry_date.strftime('%Y-%m-%d')
+                    except (ValueError, TypeError):
+                        # Fallback to string slicing if parsing fails
+                        expiry_formatted = f"{contract.lastTradeDateOrContractMonth[:4]}-{contract.lastTradeDateOrContractMonth[4:6]}-{contract.lastTradeDateOrContractMonth[6:]}"
                     
                     # PnL from portfolio is often delayed/static compared to live calc
                     # but let's prefer portfolio PnL if available as it matches account window
@@ -388,7 +403,6 @@ class IBClient:
         except Exception as e:
             print(f"Error fetching positions: {e}")
             import traceback
-            traceback.print_exc()
             traceback.print_exc()
             return {
                 "accounts": [],

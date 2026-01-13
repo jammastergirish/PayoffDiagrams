@@ -179,6 +179,7 @@ export function PayoffDashboard() {
   const [optionsChainLoading, setOptionsChainLoading] = useState(false);
   const [selectedExpiry, setSelectedExpiry] = useState<string>("");
   const [activeTab, setActiveTab] = useState<string>("payoff");
+  const optionsChainCacheRef = useRef<Record<string, OptionsChain>>({});
   
   // Top-level portfolio view tabs
   const [portfolioView, setPortfolioView] = useState<"summary" | "detail">("detail");
@@ -206,25 +207,35 @@ export function PayoffDashboard() {
   const [optionsLimitPrice, setOptionsLimitPrice] = useState<string>("");
   const [optionsOrderSubmitting, setOptionsOrderSubmitting] = useState(false);
 
-  // Helper to add a leg to the strategy
-  const addLegToStrategy = (expiry: string, strike: number, right: "C" | "P", action: "BUY" | "SELL", mid: number) => {
+  // Helper to toggle a leg in the strategy
+  const toggleLegInStrategy = (expiry: string, strike: number, right: "C" | "P", action: "BUY" | "SELL", mid: number) => {
     if (!selectedTicker) return;
-    
-    // Check if leg already exists (same expiry, strike, right)
-    const exists = selectedLegs.find(
-      l => l.expiry === expiry && l.strike === strike && l.right === right
+
+    const expiryNoDashes = expiry.replace(/-/g, "");
+
+    // Check if this exact leg exists (same expiry, strike, right, AND action)
+    const existingIndex = selectedLegs.findIndex(
+      l => (l.expiry === expiry || l.expiry === expiryNoDashes) &&
+           l.strike === strike &&
+           l.right === right &&
+           l.action === action
     );
-    if (exists) return; // Don't add duplicate
-    
-    const newLeg: OptionLeg = {
-      symbol: selectedTicker,
-      expiry: expiry.replace(/-/g, ""), // Convert YYYY-MM-DD to YYYYMMDD
-      strike,
-      right,
-      action,
-      quantity: 1,
-    };
-    setSelectedLegs([...selectedLegs, newLeg]);
+
+    if (existingIndex >= 0) {
+      // Leg exists - remove it (toggle off)
+      setSelectedLegs(selectedLegs.filter((_, i) => i !== existingIndex));
+    } else {
+      // Leg doesn't exist - add it (toggle on)
+      const newLeg: OptionLeg = {
+        symbol: selectedTicker,
+        expiry: expiryNoDashes, // Convert YYYY-MM-DD to YYYYMMDD
+        strike,
+        right,
+        action,
+        quantity: 1,
+      };
+      setSelectedLegs([...selectedLegs, newLeg]);
+    }
   };
 
   // Helper to remove a leg from strategy
@@ -306,23 +317,55 @@ export function PayoffDashboard() {
   }, [optionsChain]);
 
   // Auto-load options chain when switching to options tab or changing ticker
-  const loadOptionsChain = useCallback(async (ticker: string) => {
-    if (!ticker || optionsChainLoading) return;
+  const loadOptionsChain = useCallback(async (ticker: string, forceRefresh = false) => {
+    if (!ticker || (optionsChainLoading && !forceRefresh)) return;
+
+    // Show cached data immediately if available
+    if (!forceRefresh && optionsChainCacheRef.current[ticker]) {
+      const cached = optionsChainCacheRef.current[ticker];
+      setOptionsChain(cached);
+      if (cached.expirations.length > 0 && !selectedExpiry) {
+        setSelectedExpiry(cached.expirations[0]);
+      }
+    }
+
     setOptionsChainLoading(true);
     const chain = await fetchOptionsChain(ticker);
+
+    // Update cache
+    if (chain && !chain.error) {
+      optionsChainCacheRef.current[ticker] = chain;
+    }
+
     setOptionsChain(chain);
     if (chain.expirations.length > 0) {
-      setSelectedExpiry(chain.expirations[0]);
+      // Preserve selected expiry if it still exists, otherwise select first
+      if (!chain.expirations.includes(selectedExpiry)) {
+        setSelectedExpiry(chain.expirations[0]);
+      }
     }
     setOptionsChainLoading(false);
-  }, [optionsChainLoading]);
+  }, [optionsChainLoading, selectedExpiry]);
 
-  // Clear options chain cache when ticker changes
+  // Handle ticker changes
   useEffect(() => {
-    setOptionsChain(null);
-    setSelectedExpiry("");
-    setSelectedLegs([]); // Also clear strategy when ticker changes
-    // Auto-reload if on options tab
+    // Check if we have cached data for this ticker
+    const cached = selectedTicker ? optionsChainCacheRef.current[selectedTicker] : null;
+
+    if (cached) {
+      // Use cached data immediately
+      setOptionsChain(cached);
+      if (cached.expirations.length > 0 && !selectedExpiry) {
+        setSelectedExpiry(cached.expirations[0]);
+      }
+    } else {
+      setOptionsChain(null);
+      setSelectedExpiry("");
+    }
+
+    setSelectedLegs([]); // Clear strategy when ticker changes
+
+    // Auto-reload if on options tab (will update in background if cached)
     if (activeTab === "options" && selectedTicker) {
       loadOptionsChain(selectedTicker);
     }
@@ -879,40 +922,50 @@ export function PayoffDashboard() {
     if (selectedLegs.length === 0 || !optionsChain) {
       return { data: [], maxProfit: 0, maxLoss: 0, breakevens: [] as number[] };
     }
-    
+
     const strategyPositions = legsToPositions(selectedLegs);
     const currentPrice = optionsChain.underlying_price || stockPrices[selectedTicker || ""] || 100;
-    const prices = getPriceRange(strategyPositions, currentPrice);
-    
-    // Calculate just the strategy P&L
-    const strategyPnl = calculatePnl(strategyPositions, prices);
-    
-    // Calculate combined P&L (strategy + existing positions) if toggled
-    let combinedPnl: number[] | undefined;
+
+    // Determine price range - include existing positions if superimpose is on
+    // This ensures consistent X-axis scale
+    let allPositionsForRange = strategyPositions;
+    let tickerPositions: Position[] = [];
     if (showExistingPositions && activePositions.length > 0) {
-      const tickerPositions = activePositions.filter(p => p.ticker === selectedTicker);
+      tickerPositions = activePositions.filter(p => p.ticker === selectedTicker);
       if (tickerPositions.length > 0) {
-        const existingPnl = calculatePnl(tickerPositions, prices);
-        combinedPnl = strategyPnl.map((v, i) => v + existingPnl[i]);
+        // Use combined positions for price range calculation
+        allPositionsForRange = [...strategyPositions, ...tickerPositions];
       }
     }
-    
-    // Calculate max profit/loss from strategy
+
+    const prices = getPriceRange(allPositionsForRange, currentPrice);
+
+    // Calculate just the strategy P&L (this should never change)
+    const strategyPnl = calculatePnl(strategyPositions, prices);
+
+    // Calculate combined P&L (strategy + existing positions) if toggled
+    let combinedPnl: number[] | undefined;
+    if (showExistingPositions && tickerPositions.length > 0) {
+      const existingPnl = calculatePnl(tickerPositions, prices);
+      combinedPnl = strategyPnl.map((v, i) => v + existingPnl[i]);
+    }
+
+    // Calculate max profit/loss from strategy alone
     const stats = calculateMaxRiskReward(strategyPositions);
     const breakevens = getBreakevens(prices, strategyPnl);
-    
+
     const data = prices.map((price, idx) => ({
       price,
       strategy: strategyPnl[idx],
       combined: combinedPnl ? combinedPnl[idx] : undefined,
     }));
-    
-    return { 
-      data, 
-      maxProfit: stats.maxProfit, 
-      maxLoss: stats.maxLoss, 
+
+    return {
+      data,
+      maxProfit: stats.maxProfit,
+      maxLoss: stats.maxLoss,
       breakevens,
-      currentPrice 
+      currentPrice
     };
   }, [selectedLegs, optionsChain, showExistingPositions, activePositions, selectedTicker, stockPrices, legsToPositions]);
 
@@ -2201,17 +2254,21 @@ export function PayoffDashboard() {
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-lg text-purple-400">Options Chain</CardTitle>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-400">Click bid to sell, ask to buy</span>
+                          {optionsChain && (optionsChain as any).cached && (
+                            <span className="text-xs text-yellow-400">
+                              Cached ({Math.floor((optionsChain as any).cache_age_seconds || 0)}s ago)
+                            </span>
+                          )}
                           <Button
                             size="sm"
-                            onClick={() => loadOptionsChain(selectedTicker || "")}
-                            disabled={!selectedTicker || optionsChainLoading}
-                            className="bg-purple-500 hover:bg-purple-600"
+                            onClick={() => loadOptionsChain(selectedTicker || "", true)}
+                            disabled={!selectedTicker}
+                            className={optionsChainLoading ? "bg-purple-400" : "bg-purple-500 hover:bg-purple-600"}
                           >
                             {optionsChainLoading ? (
                               <span className="flex items-center gap-2">
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                                Loading...
+                                Updating...
                               </span>
                             ) : (
                               "Refresh"
@@ -2226,7 +2283,10 @@ export function PayoffDashboard() {
                       )}
                       
                       {selectedTicker && !optionsChain && !optionsChainLoading && (
-                        <div className="text-center text-gray-500 py-12">Loading options chain...</div>
+                        <div className="text-center py-12">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mb-4" />
+                          <div className="text-gray-500">Loading options chain...</div>
+                        </div>
                       )}
                       
                       {optionsChain && optionsChain.expirations.length > 0 && (
@@ -2300,7 +2360,7 @@ export function PayoffDashboard() {
                                                 className={`text-right py-1 px-1 cursor-pointer transition-colors ${
                                                   callSellSelected ? "bg-red-500/40 ring-1 ring-red-400" : "hover:bg-red-500/30"
                                                 } ${callItm && !callSellSelected ? "bg-green-500/10" : ""}`}
-                                                onClick={() => call && addLegToStrategy(selectedExpiry, strike, "C", "SELL", call.mid)}
+                                                onClick={() => call && toggleLegInStrategy(selectedExpiry, strike, "C", "SELL", call.mid)}
                                                 title="Sell Call"
                                               >
                                                 {call?.bid?.toFixed(2) || "-"}
@@ -2309,7 +2369,7 @@ export function PayoffDashboard() {
                                                 className={`text-right py-1 px-1 cursor-pointer transition-colors ${
                                                   callBuySelected ? "bg-green-500/40 ring-1 ring-green-400" : "hover:bg-green-500/30"
                                                 } ${callItm && !callBuySelected ? "bg-green-500/10" : ""}`}
-                                                onClick={() => call && addLegToStrategy(selectedExpiry, strike, "C", "BUY", call.mid)}
+                                                onClick={() => call && toggleLegInStrategy(selectedExpiry, strike, "C", "BUY", call.mid)}
                                                 title="Buy Call"
                                               >
                                                 {call?.ask?.toFixed(2) || "-"}
@@ -2342,7 +2402,7 @@ export function PayoffDashboard() {
                                                 className={`text-right py-1 px-1 border-l border-white/10 cursor-pointer transition-colors ${
                                                   putSellSelected ? "bg-red-500/40 ring-1 ring-red-400" : "hover:bg-red-500/30"
                                                 } ${putItm && !putSellSelected ? "bg-red-500/10" : ""}`}
-                                                onClick={() => put && addLegToStrategy(selectedExpiry, strike, "P", "SELL", put.mid)}
+                                                onClick={() => put && toggleLegInStrategy(selectedExpiry, strike, "P", "SELL", put.mid)}
                                                 title="Sell Put"
                                               >
                                                 {put?.bid?.toFixed(2) || "-"}
@@ -2351,7 +2411,7 @@ export function PayoffDashboard() {
                                                 className={`text-right py-1 px-1 cursor-pointer transition-colors ${
                                                   putBuySelected ? "bg-green-500/40 ring-1 ring-green-400" : "hover:bg-green-500/30"
                                                 } ${putItm && !putBuySelected ? "bg-red-500/10" : ""}`}
-                                                onClick={() => put && addLegToStrategy(selectedExpiry, strike, "P", "BUY", put.mid)}
+                                                onClick={() => put && toggleLegInStrategy(selectedExpiry, strike, "P", "BUY", put.mid)}
                                                 title="Buy Put"
                                               >
                                                 {put?.ask?.toFixed(2) || "-"}
@@ -2511,21 +2571,23 @@ export function PayoffDashboard() {
                                       name === "strategy" ? "Strategy P&L" : "Combined P&L"
                                     ]}
                                   />
-                                  <Line 
-                                    type="monotone" 
-                                    dataKey="strategy" 
-                                    stroke="#a855f7" 
-                                    strokeWidth={2} 
-                                    dot={false}
-                                    name="Strategy"
-                                    isAnimationActive={false}
-                                  />
+                                  {!showExistingPositions && (
+                                    <Line
+                                      type="monotone"
+                                      dataKey="strategy"
+                                      stroke="#a855f7"
+                                      strokeWidth={2}
+                                      dot={false}
+                                      name="Strategy"
+                                      isAnimationActive={false}
+                                    />
+                                  )}
                                   {showExistingPositions && (
-                                    <Line 
-                                      type="monotone" 
-                                      dataKey="combined" 
-                                      stroke="#f97316" 
-                                      strokeWidth={2} 
+                                    <Line
+                                      type="monotone"
+                                      dataKey="combined"
+                                      stroke="#f97316"
+                                      strokeWidth={2}
                                       dot={false}
                                       name="Combined"
                                       isAnimationActive={false}

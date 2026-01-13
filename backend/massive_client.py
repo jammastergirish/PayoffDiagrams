@@ -403,7 +403,7 @@ def get_news_article(article_id: str) -> dict:
         return {"error": str(e), "articleId": article_id}
 
 
-def get_options_chain(symbol: str, max_strikes: int = 30) -> dict:
+def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2000) -> dict:
     """
     Fetch options chain snapshot from Massive.com API.
     
@@ -436,6 +436,10 @@ def get_options_chain(symbol: str, max_strikes: int = 30) -> dict:
         underlying_snapshot = get_daily_snapshot(symbol.upper())
         underlying_price = underlying_snapshot.get("current_price", 0.0) if underlying_snapshot else 0.0
         print(f"DEBUG [Massive]: Underlying price for {symbol}: ${underlying_price:.2f}")
+
+        # Early exit if no underlying price
+        if underlying_price <= 0:
+            print(f"WARNING [Massive]: No underlying price for {symbol}, fetching anyway...")
         
         # Get the options chain snapshot
         # This returns an iterator of OptionContractSnapshot objects
@@ -447,11 +451,27 @@ def get_options_chain(symbol: str, max_strikes: int = 30) -> dict:
         strikes_set = set()
         
         contract_count = 0
+        strike_range = None
+
+        # Pre-calculate strike range if we have underlying price
+        if underlying_price > 0:
+            # Calculate reasonable strike range (±50% of underlying price)
+            min_strike = underlying_price * 0.5
+            max_strike = underlying_price * 1.5
+            strike_range = (min_strike, max_strike)
+            print(f"DEBUG [Massive]: Filtering strikes between ${min_strike:.2f} and ${max_strike:.2f}")
+
         for opt in chain_iter:
             contract_count += 1
-            # Log progress every 500 contracts
-            if contract_count % 500 == 0:
-                print(f"DEBUG [Massive]: Processed {contract_count} contracts...")
+
+            # Stop early if we've processed enough contracts
+            if contract_count > max_contracts:
+                print(f"DEBUG [Massive]: Reached max contracts limit ({max_contracts})")
+                break
+
+            # Log progress less frequently
+            if contract_count % 1000 == 0:
+                print(f"DEBUG [Massive]: Processed {contract_count} contracts, found {len(all_contracts)} valid...")
 
             # Extract underlying price from first contract
             if underlying_price == 0 and hasattr(opt, 'underlying_asset'):
@@ -468,9 +488,13 @@ def get_options_chain(symbol: str, max_strikes: int = 30) -> dict:
             expiry = str(details.expiration_date) if hasattr(details, 'expiration_date') else None
             strike = float(details.strike_price) if hasattr(details, 'strike_price') else None
             contract_type = str(details.contract_type).upper() if hasattr(details, 'contract_type') else None
-            
+
             if not expiry or strike is None or contract_type not in ['CALL', 'PUT', 'C', 'P']:
                 continue
+
+            # Early filtering: skip strikes way out of range
+            if strike_range and (strike < strike_range[0] or strike > strike_range[1]):
+                continue  # Skip this contract early
             
             expirations_set.add(expiry)
             strikes_set.add(strike)
@@ -598,7 +622,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30) -> dict:
         # Filter expirations to only those that have actual data
         expirations_with_data = [exp for exp in expirations if exp in calls or exp in puts]
         
-        print(f"DEBUG [Massive]: Options chain for {symbol} - {len(expirations_with_data)} expirations with data (of {len(expirations)} total), {len(strikes)} strikes, {len(all_contracts)} contracts")
+        print(f"DEBUG [Massive]: Options chain for {symbol} - {len(expirations_with_data)} expirations, {len(strikes)} strikes, {len(all_contracts)} valid contracts from {contract_count} total processed")
         
         return {
             "symbol": symbol.upper(),
