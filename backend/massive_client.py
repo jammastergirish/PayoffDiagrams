@@ -363,6 +363,122 @@ def get_news(symbol: str, limit: int = 15) -> dict:
     }
 
 
+def get_market_news(limit: int = 25) -> dict:
+    """
+    Fetch general market news from multiple sources.
+    
+    Gets news from major market indices and general market coverage.
+    Results are merged and sorted by datetime DESC, deduplicated by headline.
+    
+    Args:
+        limit: Maximum total headlines to return (default 25)
+        
+    Returns:
+        Dict with headlines list
+    """
+    if not _client:
+        return {
+            "headlines": [],
+            "error": "Massive API key not configured"
+        }
+    
+    # Clamp limit to reasonable range
+    limit = max(1, min(limit, 50))
+    per_source_limit = 15  # Fetch from each source, then merge
+    
+    all_headlines = []
+    seen_headlines = set()  # For deduplication
+    
+    # Market tickers to fetch news from
+    market_tickers = ["SPY", "QQQ", "DIA"]
+    
+    for ticker in market_tickers:
+        # --- Fetch from Benzinga ---
+        try:
+            news_iter = _client.list_benzinga_news_v2(
+                tickers=ticker,
+                limit=per_source_limit,
+                sort="published.desc"
+            )
+            
+            count = 0
+            for article in news_iter:
+                if count >= per_source_limit:
+                    break
+                count += 1
+                
+                headline = getattr(article, 'title', '')
+                if headline in seen_headlines:
+                    continue
+                seen_headlines.add(headline)
+                
+                all_headlines.append({
+                    "articleId": str(getattr(article, 'benzinga_id', '')),
+                    "headline": headline,
+                    "providerCode": "BZ",
+                    "providerName": "Benzinga",
+                    "time": getattr(article, 'published', ''),
+                    "teaser": getattr(article, 'teaser', ''),
+                    "body": getattr(article, 'body', getattr(article, 'teaser', '')),
+                    "url": getattr(article, 'url', ''),
+                    "author": getattr(article, 'author', ''),
+                })
+            
+        except Exception as e:
+            print(f"WARN [Massive]: Failed to fetch Benzinga market news for {ticker}: {e}")
+        
+        # --- Fetch from Reference News ---
+        try:
+            ref_news_iter = _client.list_ticker_news(
+                ticker=ticker,
+                limit=per_source_limit,
+                order="desc",
+                sort="published_utc"
+            )
+            
+            count = 0
+            for article in ref_news_iter:
+                if count >= per_source_limit:
+                    break
+                count += 1
+                
+                headline = getattr(article, 'title', '')
+                if headline in seen_headlines:
+                    continue
+                seen_headlines.add(headline)
+                
+                publisher = getattr(article, 'publisher', None)
+                publisher_name = getattr(publisher, 'name', 'News') if publisher else 'News'
+                provider_code = ''.join(c for c in publisher_name if c.isalpha())[:3].upper() or "NEWS"
+                
+                all_headlines.append({
+                    "articleId": str(getattr(article, 'id', '')),
+                    "headline": headline,
+                    "providerCode": provider_code,
+                    "providerName": publisher_name,
+                    "time": getattr(article, 'published_utc', ''),
+                    "teaser": getattr(article, 'description', ''),
+                    "body": getattr(article, 'description', ''),
+                    "url": getattr(article, 'article_url', ''),
+                    "author": getattr(article, 'author', ''),
+                })
+            
+        except Exception as e:
+            print(f"WARN [Massive]: Failed to fetch reference market news for {ticker}: {e}")
+    
+    # Sort by time descending (newest first)
+    all_headlines.sort(key=lambda x: x.get("time", ""), reverse=True)
+    
+    # Limit total results
+    all_headlines = all_headlines[:limit]
+    
+    print(f"DEBUG [Massive]: Returning {len(all_headlines)} market news headlines")
+    
+    return {
+        "headlines": all_headlines
+    }
+
+
 def get_news_article(article_id: str) -> dict:
     """
     Get full article content from Benzinga.

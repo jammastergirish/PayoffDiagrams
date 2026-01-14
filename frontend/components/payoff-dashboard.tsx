@@ -18,9 +18,10 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote, placeOptionsOrder, OptionLeg } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, fetchMarketNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote, placeOptionsOrder, OptionLeg } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
+import { NewsItemList } from "@/components/news-item-list";
 import { CandlestickChart } from "@/components/candlestick-chart";
 import { useToast } from "@/components/ui/toast";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
@@ -213,7 +214,11 @@ export function PayoffDashboard() {
   const optionsChainCacheRef = useRef<Record<string, OptionsChain>>({});
   
   // Top-level portfolio view tabs
-  const [portfolioView, setPortfolioView] = useState<"summary" | "detail">("detail");
+  const [portfolioView, setPortfolioView] = useState<"news" | "summary" | "detail">("detail");
+  
+  // Market News State (separate from per-ticker news)
+  const [marketNewsHeadlines, setMarketNewsHeadlines] = useState<NewsHeadline[]>([]);
+  const [marketNewsLoading, setMarketNewsLoading] = useState(false);
   
   // Portfolio Summary sort state
   type SortColumn = "ticker" | "underlyingPrice" | "unrealizedPnl" | "unrealizedPnlPct" | "dailyPnl" | "dailyPnlPct" | "marketValue" | "maxLoss" | "maxProfit";
@@ -614,6 +619,38 @@ export function PayoffDashboard() {
       clearInterval(interval);
     };
   }, [selectedTicker, isLiveMode, ibConnected, startLoadTask, completeLoadTask]);
+
+  // Fetch market news when Market News tab is selected
+  useEffect(() => {
+    if (!isLiveMode || !ibConnected) return;
+    if (portfolioView !== "news") return;
+    
+    const fetchMarketNews = () => {
+      setMarketNewsLoading(true);
+      fetchMarketNewsHeadlines(25)
+        .then(data => {
+          if (isMountedRef.current) {
+            setMarketNewsHeadlines(data.headlines || []);
+          }
+        })
+        .catch(err => {
+          console.error("Error fetching market news:", err);
+        })
+        .finally(() => {
+          if (isMountedRef.current) {
+            setMarketNewsLoading(false);
+          }
+        });
+    };
+    
+    // Initial fetch
+    fetchMarketNews();
+    
+    // Poll every 30 seconds
+    const interval = setInterval(fetchMarketNews, 30000);
+    
+    return () => clearInterval(interval);
+  }, [portfolioView, isLiveMode, ibConnected]);
 
   // Fetch ticker details (company name, logo) when ticker changes
   useEffect(() => {
@@ -1254,11 +1291,33 @@ export function PayoffDashboard() {
       </div>
 
       {/* Portfolio Summary / Detail Tabs */}
-      <Tabs value={portfolioView} onValueChange={(v) => setPortfolioView(v as "summary" | "detail")} className="w-full">
+      <Tabs value={portfolioView} onValueChange={(v) => setPortfolioView(v as "news" | "summary" | "detail")} className="w-full">
         <TabsList className="bg-slate-900 border border-white/10">
+          <TabsTrigger value="news" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400">Market News</TabsTrigger>
           <TabsTrigger value="summary" className="data-[state=active]:bg-white/10 data-[state=active]:text-white">Portfolio Summary</TabsTrigger>
           <TabsTrigger value="detail" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400">Portfolio Detail</TabsTrigger>
         </TabsList>
+        
+        {/* Market News Tab */}
+        <TabsContent value="news" className="mt-4">
+          <Card className="bg-slate-950 border-white/10 text-white">
+            <CardHeader className="pb-2 border-b border-white/5">
+              <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Market News</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <NewsItemList
+                headlines={marketNewsHeadlines}
+                loading={marketNewsLoading}
+                emptyMessage="No market news available"
+                accentColor="blue"
+                onArticleClick={(article) => {
+                  setSelectedArticle(article);
+                  setIsNewsModalOpen(true);
+                }}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
         
         {/* Portfolio Summary Tab */}
         <TabsContent value="summary" className="mt-4">
@@ -1783,71 +1842,18 @@ export function PayoffDashboard() {
                       <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Latest News for {selectedTicker}</CardTitle>
                     </CardHeader>
                     <CardContent className="pt-2">
-                      {newsLoading && (
-                        <div className="flex items-center justify-center py-12">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
-                        </div>
-                      )}
-                      {!newsLoading && newsHeadlines.length === 0 && (
-                        <div className="text-gray-500 py-8 text-center">
-                          {selectedTicker ? "No news available for this ticker" : "Select a ticker to view news"}
-                        </div>
-                      )}
-                      {!newsLoading && newsHeadlines.length > 0 && (
-                        <div className="space-y-2">
-                          {newsHeadlines.map((news, idx) => (
-                            <div
-                              key={`${news.articleId}-${idx}`}
-                              className="p-4 bg-white/5 rounded-lg border border-white/5 hover:bg-white/10 hover:border-orange-500/30 transition-colors cursor-pointer group"
-                              onClick={() => {
-                                setSelectedArticle({
-                                  articleId: news.articleId,
-                                  providerCode: news.providerCode,
-                                  headline: decodeHtmlEntities(news.headline),
-                                  body: news.body || news.teaser,
-                                  url: news.url
-                                });
-                                setIsNewsModalOpen(true);
-                              }}
-                            >
-                              <div className="flex items-start justify-between gap-4">
-                                <div className="flex-1">
-                                  <h3 className="text-sm font-medium text-white group-hover:text-orange-400 transition-colors leading-snug">
-                                    {decodeHtmlEntities(news.headline)}
-                                  </h3>
-                                  <div className="flex items-center gap-3 mt-2">
-                                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-                                      {news.providerName || news.providerCode}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                      {formatDateTime(news.time)}
-                                    </span>
-                                  </div>
-                                </div>
-                                <span className="text-gray-600 group-hover:text-orange-500 transition-colors text-lg">→</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      <NewsItemList
+                        headlines={newsHeadlines}
+                        loading={newsLoading}
+                        emptyMessage={selectedTicker ? "No news available for this ticker" : "Select a ticker to view news"}
+                        accentColor="orange"
+                        onArticleClick={(article) => {
+                          setSelectedArticle(article);
+                          setIsNewsModalOpen(true);
+                        }}
+                      />
                     </CardContent>
                   </Card>
-
-                  {/* News Article Modal */}
-                  {selectedArticle && (
-                    <NewsModal
-                      isOpen={isNewsModalOpen}
-                      onClose={() => {
-                        setIsNewsModalOpen(false);
-                        setSelectedArticle(null);
-                      }}
-                      providerCode={selectedArticle.providerCode}
-                      articleId={selectedArticle.articleId}
-                      headline={selectedArticle.headline}
-                      articleBody={selectedArticle.body}
-                      articleUrl={selectedArticle.url}
-                    />
-                  )}
                 </TabsContent>
 
                 <TabsContent value="payoff" className="mt-4 space-y-6">
@@ -2724,6 +2730,22 @@ export function PayoffDashboard() {
       </Tabs>
         </div>
        )}
+
+      {/* Global News Article Modal - accessible from both Market News and per-ticker News tabs */}
+      {selectedArticle && (
+        <NewsModal
+          isOpen={isNewsModalOpen}
+          onClose={() => {
+            setIsNewsModalOpen(false);
+            setSelectedArticle(null);
+          }}
+          providerCode={selectedArticle.providerCode}
+          articleId={selectedArticle.articleId}
+          headline={selectedArticle.headline}
+          articleBody={selectedArticle.body}
+          articleUrl={selectedArticle.url}
+        />
+      )}
 
     </div>
   );

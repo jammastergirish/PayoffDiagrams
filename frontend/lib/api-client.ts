@@ -157,6 +157,30 @@ export async function fetchNewsHeadlines(
     }
 }
 
+export async function fetchMarketNewsHeadlines(
+    limit: number = 25
+): Promise<{ headlines: NewsHeadline[] }> {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const res = await fetch(`${API_BASE}/api/news/market?limit=${limit}`, {
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) throw new Error("Failed to fetch market news");
+        return await res.json();
+    } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+            console.warn('Market news request timed out');
+        } else {
+            console.error(e);
+        }
+        return { headlines: [] };
+    }
+}
+
 export async function fetchNewsArticle(
     providerCode: string,
     articleId: string

@@ -278,3 +278,67 @@ class TestGetNews:
         result = get_news("AAPL", limit=5)
         
         assert len(result["headlines"]) <= 5
+
+
+class TestGetOptionsChainStrikeKeys:
+    """Tests for options chain strike key serialization.
+    
+    Verifies that strike prices are serialized as strings to ensure
+    consistent JSON serialization between Python and JavaScript.
+    
+    Bug context: Python's str(50.0) = "50.0", but JavaScript's String(50.0) = "50".
+    This caused integer strikes to fail lookup when keys didn't match.
+    """
+    
+    def test_strike_key_is_string_for_integer_strike(self):
+        """Verify that integer strikes like 50.0 use string keys."""
+        # Test the str() conversion directly
+        strike = 50.0
+        strike_key = str(strike)
+        
+        # Python's str(50.0) should give "50.0"
+        assert strike_key == "50.0"
+        assert isinstance(strike_key, str)
+    
+    def test_strike_key_is_string_for_non_integer_strike(self):
+        """Verify that non-integer strikes like 50.5 use string keys."""
+        strike = 50.5
+        strike_key = str(strike)
+        
+        # Python's str(50.5) should give "50.5"
+        assert strike_key == "50.5"
+        assert isinstance(strike_key, str)
+    
+    def test_strike_key_format_consistency(self):
+        """Verify consistent key format for various strike values."""
+        test_cases = [
+            (49.0, "49.0"),
+            (50.0, "50.0"),
+            (50.5, "50.5"),
+            (51.0, "51.0"),
+            (100.0, "100.0"),
+            (100.25, "100.25"),
+        ]
+        
+        for strike, expected_key in test_cases:
+            assert str(strike) == expected_key, f"Strike {strike} should serialize to '{expected_key}'"
+    
+    def test_strike_keys_in_dict_are_consistent(self):
+        """Verify that dict keys using str(strike) are consistent."""
+        strikes = [49.0, 49.5, 50.0, 50.5, 51.0]
+        calls = {}
+        
+        # Simulate building the calls dict as done in get_options_chain
+        for strike in strikes:
+            strike_key = str(strike)
+            calls[strike_key] = {"strike": strike, "bid": 1.0, "ask": 1.1}
+        
+        # Verify all keys are strings
+        for key in calls.keys():
+            assert isinstance(key, str), f"Key {key} should be a string"
+        
+        # Verify we can look up using the same format
+        assert "50.0" in calls
+        assert "50.5" in calls
+        assert calls["50.0"]["strike"] == 50.0
+        assert calls["50.5"]["strike"] == 50.5

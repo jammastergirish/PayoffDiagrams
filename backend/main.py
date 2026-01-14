@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .ib_client import ib_client, PositionModel
-from .massive_client import get_historical_bars, get_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot, get_options_chain as massive_get_options_chain
+from .massive_client import get_historical_bars, get_news, get_market_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot, get_options_chain as massive_get_options_chain
 import asyncio
 import json
 from pathlib import Path
@@ -303,6 +303,17 @@ def get_price_snapshot(symbol: str, force_refresh: bool = False):
         snapshot_cache[cache_key] = (datetime.now(), data)
 
     return data
+
+
+@app.get("/api/news/market")
+def get_market_news_headlines(limit: int = 25):
+    """
+    Get general market news from Massive.com across major indices.
+    
+    Args:
+        limit: Max number of headlines (1-50, default 25)
+    """
+    return get_market_news(limit)
 
 
 @app.get("/api/news/{symbol}")
