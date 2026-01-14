@@ -168,3 +168,54 @@ describe('Prompt Generation for Analysis', () => {
     expect(prompt).toContain('general market');
   });
 });
+
+describe('Ticker-Headlines Matching Guard', () => {
+  it('should only allow analysis when headlines ticker matches selected ticker', () => {
+    // Simulate the guard logic from payoff-dashboard.tsx
+    const shouldAnalyze = (
+      selectedTicker: string,
+      newsHeadlinesTicker: string,
+      newsHeadlinesLength: number
+    ): boolean => {
+      if (!selectedTicker || newsHeadlinesLength === 0) return false;
+      if (newsHeadlinesTicker !== selectedTicker) return false;
+      return true;
+    };
+
+    // Should proceed: ticker matches
+    expect(shouldAnalyze('AAPL', 'AAPL', 5)).toBe(true);
+    
+    // Should NOT proceed: ticker mismatch (old headlines from different ticker)
+    expect(shouldAnalyze('OSCR', 'MU', 5)).toBe(false);
+    
+    // Should NOT proceed: no headlines yet
+    expect(shouldAnalyze('AAPL', 'AAPL', 0)).toBe(false);
+    
+    // Should NOT proceed: headlines ticker empty (still loading)
+    expect(shouldAnalyze('AAPL', '', 5)).toBe(false);
+    
+    // Should NOT proceed: no ticker selected
+    expect(shouldAnalyze('', 'AAPL', 5)).toBe(false);
+  });
+
+  it('should clear headlines ticker when switching tickers (before new load)', () => {
+    // This simulates the flow when user changes ticker:
+    // 1. User on MU, newsHeadlinesTicker = 'MU', newsHeadlines = [MU articles]
+    // 2. User clicks OSCR
+    // 3. setNewsHeadlinesTicker('') called immediately (or with OSCR cached)
+    // 4. Analysis effect runs, sees mismatch, skips
+    // 5. Headlines load for OSCR, setNewsHeadlinesTicker('OSCR')
+    // 6. Analysis effect runs again, now matches, proceeds
+
+    const states = [
+      { step: 'initial', selectedTicker: 'MU', headlinesTicker: 'MU', shouldAnalyze: true },
+      { step: 'ticker changed, loading', selectedTicker: 'OSCR', headlinesTicker: '', shouldAnalyze: false },
+      { step: 'headlines loaded', selectedTicker: 'OSCR', headlinesTicker: 'OSCR', shouldAnalyze: true },
+    ];
+
+    states.forEach(({ step, selectedTicker, headlinesTicker, shouldAnalyze }) => {
+      const result = selectedTicker && headlinesTicker === selectedTicker;
+      expect(result).toBe(shouldAnalyze);
+    });
+  });
+});

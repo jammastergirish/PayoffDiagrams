@@ -186,6 +186,7 @@ export function PayoffDashboard() {
 
   // News State
   const [newsHeadlines, setNewsHeadlines] = useState<NewsHeadline[]>([]);
+  const [newsHeadlinesTicker, setNewsHeadlinesTicker] = useState<string>(""); // Track which ticker headlines belong to
   const [newsLoading, setNewsLoading] = useState(false);
   const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string; body?: string; url?: string; imageUrl?: string } | null>(null);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
@@ -573,6 +574,7 @@ export function PayoffDashboard() {
   useEffect(() => {
     if (!selectedTicker || !isLiveMode || !ibConnected) {
       setNewsHeadlines([]);
+      setNewsHeadlinesTicker("");
       setNewsLoading(false);
       return;
     }
@@ -584,9 +586,11 @@ export function PayoffDashboard() {
 
     if (hasCached) {
       setNewsHeadlines(cached);
+      setNewsHeadlinesTicker(ticker);
       setNewsLoading(false);
     } else {
       setNewsHeadlines([]);
+      setNewsHeadlinesTicker(""); // Clear until new headlines load
       setNewsLoading(true);
     }
 
@@ -605,6 +609,7 @@ export function PayoffDashboard() {
           if (headlines.length > 0 || !hasExistingData) {
             newsCacheRef.current[ticker] = headlines;
             setNewsHeadlines(headlines);
+            setNewsHeadlinesTicker(ticker);
           }
         })
         .catch(err => {
@@ -680,8 +685,11 @@ export function PayoffDashboard() {
     if (marketNewsHeadlines.length === 0) return;
     if (marketAnalysisInProgressRef.current) return; // Prevent concurrent analyses
     
+    // Capture current values to avoid closure issues
+    const currentHeadlines = marketNewsHeadlines.slice(0, 10);
+    
     // Create a fingerprint of current headlines to detect changes
-    const headlinesFingerprint = marketNewsHeadlines.slice(0, 10).map(h => h.articleId).join(",");
+    const headlinesFingerprint = currentHeadlines.map(h => h.articleId).join(",");
     if (headlinesFingerprint === lastMarketAnalysisRef.current) return;
     lastMarketAnalysisRef.current = headlinesFingerprint;
     
@@ -693,7 +701,7 @@ export function PayoffDashboard() {
       setMarketNewsAnalysisLoading(true);
       
       try {
-        const headlines = marketNewsHeadlines.slice(0, 10).map(h => h.headline);
+        const headlines = currentHeadlines.map(h => h.headline);
         // Get tickers at analysis time (not from dependency)
         const tickers = [...new Set(positions.map(p => p.ticker))];
         
@@ -727,10 +735,16 @@ export function PayoffDashboard() {
   const tickerAnalysisInProgressRef = useRef(false);
   useEffect(() => {
     if (!selectedTicker || newsHeadlines.length === 0) return;
+    // Only analyze if headlines belong to the selected ticker
+    if (newsHeadlinesTicker !== selectedTicker) return;
     if (tickerAnalysisInProgressRef.current) return; // Prevent concurrent analyses
     
+    // Capture current values to avoid closure issues
+    const currentTicker = selectedTicker;
+    const currentHeadlines = newsHeadlines.slice(0, 10);
+    
     // Create a fingerprint of current ticker + headlines to detect changes
-    const fingerprint = `${selectedTicker}:${newsHeadlines.slice(0, 10).map(h => h.articleId).join(",")}`;
+    const fingerprint = `${currentTicker}:${currentHeadlines.map(h => h.articleId).join(",")}`;
     if (fingerprint === lastTickerAnalysisRef.current) return;
     lastTickerAnalysisRef.current = fingerprint;
     
@@ -745,14 +759,14 @@ export function PayoffDashboard() {
       setTickerNewsAnalysisLoading(true);
       
       try {
-        const headlines = newsHeadlines.slice(0, 10).map(h => h.headline);
+        const headlines = currentHeadlines.map(h => h.headline);
         
         // Store the prompt for "View Prompt" feature
         const headlinesStr = headlines.map(h => `- ${h}`).join("\n");
-        const prompt = `What do these recent news headlines mean for ${selectedTicker.toUpperCase()} stock? Give a summary in 100 words focusing on potential price impact.\n\nHeadlines:\n${headlinesStr}`;
+        const prompt = `What do these recent news headlines mean for ${currentTicker.toUpperCase()} stock? Give a summary in 100 words focusing on potential price impact.\n\nHeadlines:\n${headlinesStr}`;
         setTickerNewsPrompt(prompt);
         
-        const result = await fetchTickerNewsAnalysis(headlines, selectedTicker);
+        const result = await fetchTickerNewsAnalysis(headlines, currentTicker);
         if (result.summary) {
           setTickerNewsAnalysis(result.summary);
         } else if (result.error) {
@@ -768,7 +782,7 @@ export function PayoffDashboard() {
     };
     
     analyze();
-  }, [selectedTicker, newsHeadlines]);
+  }, [selectedTicker, newsHeadlines, newsHeadlinesTicker]);
 
   // Fetch ticker details (company name, logo) when ticker changes
   useEffect(() => {
