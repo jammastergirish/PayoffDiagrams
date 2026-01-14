@@ -1,10 +1,7 @@
 /**
- * Tests for API client functions - watchlist and snapshot.
+ * Tests for API client functions - daily snapshot.
  * 
  * Tests cover:
- * - fetchWatchlist: Retrieve watchlist tickers
- * - addToWatchlist: Add new ticker
- * - removeFromWatchlist: Remove ticker
  * - fetchDailySnapshot: Get price and daily change
  */
 
@@ -15,119 +12,15 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Import after mocking
-import { 
-  fetchWatchlist, 
-  addToWatchlist, 
-  removeFromWatchlist, 
-  fetchDailySnapshot 
-} from '../lib/api-client';
+import { fetchDailySnapshot } from '../lib/api-client';
 
-describe('Watchlist API Functions', () => {
+describe('Daily Snapshot API', () => {
   beforeEach(() => {
     mockFetch.mockClear();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  describe('fetchWatchlist', () => {
-    it('should return tickers from API', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ tickers: ['AAPL', 'MSFT', 'GOOG'] }),
-      });
-
-      const result = await fetchWatchlist();
-
-      expect(result).toEqual(['AAPL', 'MSFT', 'GOOG']);
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/watchlist')
-      );
-    });
-
-    it('should return empty array on error', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-      });
-
-      const result = await fetchWatchlist();
-
-      expect(result).toEqual([]);
-    });
-
-    it('should handle network error', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'));
-
-      const result = await fetchWatchlist();
-
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('addToWatchlist', () => {
-    it('should POST ticker and return updated list', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ tickers: ['AAPL', 'TSLA'] }),
-      });
-
-      const result = await addToWatchlist('TSLA');
-
-      expect(result).toEqual(['AAPL', 'TSLA']);
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/watchlist'),
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ ticker: 'TSLA' }),
-        })
-      );
-    });
-
-    it('should return empty array on failure', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false });
-
-      const result = await addToWatchlist('INVALID');
-
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('removeFromWatchlist', () => {
-    it('should DELETE ticker and return updated list', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ tickers: ['MSFT'] }),
-      });
-
-      const result = await removeFromWatchlist('AAPL');
-
-      expect(result).toEqual(['MSFT']);
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/watchlist/AAPL'),
-        expect.objectContaining({ method: 'DELETE' })
-      );
-    });
-
-    it('should URL encode special characters', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ tickers: [] }),
-      });
-
-      await removeFromWatchlist('BRK.B');
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('BRK.B'),
-        expect.anything()
-      );
-    });
-  });
-});
-
-describe('Daily Snapshot API', () => {
-  beforeEach(() => {
-    mockFetch.mockClear();
   });
 
   describe('fetchDailySnapshot', () => {

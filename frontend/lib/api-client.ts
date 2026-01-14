@@ -199,53 +199,6 @@ export async function fetchNewsArticle(
 
 
 // =====================
-// Watchlist API Functions
-// =====================
-
-export async function fetchWatchlist(): Promise<string[]> {
-    try {
-        const res = await fetch(`${API_BASE}/api/watchlist`);
-        if (!res.ok) throw new Error("Failed to fetch watchlist");
-        const data = await res.json();
-        return data.tickers || [];
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
-}
-
-export async function addToWatchlist(ticker: string): Promise<string[]> {
-    try {
-        const res = await fetch(`${API_BASE}/api/watchlist`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ticker }),
-        });
-        if (!res.ok) throw new Error("Failed to add to watchlist");
-        const data = await res.json();
-        return data.tickers || [];
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
-}
-
-export async function removeFromWatchlist(ticker: string): Promise<string[]> {
-    try {
-        const res = await fetch(`${API_BASE}/api/watchlist/${encodeURIComponent(ticker)}`, {
-            method: "DELETE",
-        });
-        if (!res.ok) throw new Error("Failed to remove from watchlist");
-        const data = await res.json();
-        return data.tickers || [];
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
-}
-
-
-// =====================
 // Daily Snapshot API
 // =====================
 

@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, fetchMarketNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote, placeOptionsOrder, OptionLeg, fetchMarketNewsAnalysis, fetchTickerNewsAnalysis, LLMAnalysisResponse } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, fetchMarketNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote, placeOptionsOrder, OptionLeg, fetchMarketNewsAnalysis, fetchTickerNewsAnalysis, LLMAnalysisResponse } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
 import { NewsItemList } from "@/components/news-item-list";
@@ -193,9 +193,7 @@ export function PayoffDashboard() {
   // Ticker Details State (company name, logo)
   const [tickerDetailsCache, setTickerDetailsCache] = useState<Record<string, TickerDetails>>({});
 
-  // Watchlist State (custom tickers)
-  const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
-  const [newTickerInput, setNewTickerInput] = useState("");
+  // Snapshot cache for daily price data
   const [snapshotCache, setSnapshotCache] = useState<Record<string, DailySnapshot>>({});
 
   // Trade Form State
@@ -959,30 +957,6 @@ export function PayoffDashboard() {
     };
   }, [startLoadTask, completeLoadTask, registerLoadTasks]);
 
-  // Load watchlist from backend
-  useEffect(() => {
-    fetchWatchlist().then(setWatchlistTickers);
-  }, []);
-
-  // Fetch daily snapshots for watchlist tickers
-  useEffect(() => {
-    watchlistTickers.forEach(ticker => {
-      // Only fetch if not already in cache
-      if (!snapshotCache[ticker]) {
-        fetchDailySnapshot(ticker).then(snapshot => {
-          if (snapshot && !snapshot.error) {
-            setSnapshotCache(prev => ({
-              ...prev,
-              [ticker]: snapshot
-            }));
-          }
-        });
-      }
-    });
-  }, [watchlistTickers]);
-
-
-
   const tickers = useMemo(() => {
     // Filter positions first by Account
     let visible = positions;
@@ -990,10 +964,8 @@ export function PayoffDashboard() {
         visible = positions.filter(p => p.account === selectedAccount);
     }
     const positionTickers = visible.map(p => p.ticker);
-    // Merge with watchlist, remove duplicates
-    const allTickers = new Set([...positionTickers, ...watchlistTickers]);
-    return Array.from(allTickers).sort();
-  }, [positions, selectedAccount, watchlistTickers]);
+    return [...new Set(positionTickers)].sort();
+  }, [positions, selectedAccount]);
 
   // Per-ticker P&L summary (aggregates stock + options)
   const perTickerPnl = useMemo(() => {
@@ -1729,68 +1701,6 @@ export function PayoffDashboard() {
               )}
             </CardContent>
           </Card>
-          
-          {/* Watchlist Table */}
-          {watchlistTickers.filter(t => !tickerSummaries.find(s => s.ticker === t)).length > 0 && (
-            <Card className="bg-slate-950 border-white/10 text-white mt-4">
-              <CardHeader>
-                <CardTitle className="text-blue-400 font-normal uppercase tracking-wider text-xs">Watchlist</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-white/10 text-gray-500 text-xs uppercase tracking-wider">
-                        <th className="text-left py-2 px-2">Ticker</th>
-                        <th className="text-right py-2 px-2">Price</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {watchlistTickers
-                        .filter(t => !tickerSummaries.find(s => s.ticker === t))
-                        .map((ticker) => (
-                          <tr 
-                            key={ticker} 
-                            className="border-b border-white/5 hover:bg-blue-500/10 cursor-pointer"
-                            onClick={() => {
-                              setSelectedTicker(ticker);
-                              setPortfolioView("detail");
-                            }}
-                          >
-                            <td className="py-2 px-2">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 flex-shrink-0 rounded bg-white/10 overflow-hidden">
-                                  {tickerDetailsCache[ticker]?.branding?.icon_url ? (
-                                    <img 
-                                      src={tickerDetailsCache[ticker].branding!.icon_url!}
-                                      alt={ticker}
-                                      className="w-full h-full object-contain"
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px] font-bold">
-                                      {ticker.slice(0, 2)}
-                                    </div>
-                                  )}
-                                </div>
-                                <span className="font-medium text-blue-400">{ticker}</span>
-                              </div>
-                            </td>
-                            <td className="text-right py-2 px-2 font-mono text-gray-300">
-                              {stockPrices[ticker] 
-                                ? `$${stockPrices[ticker].toFixed(2)}` 
-                                : snapshotCache[ticker]?.current_price 
-                                  ? `$${snapshotCache[ticker].current_price!.toFixed(2)}`
-                                  : '-'
-                              }
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </TabsContent>
         
         {/* Portfolio Detail Tab */}
@@ -1806,8 +1716,6 @@ export function PayoffDashboard() {
                     const pnl = perTickerPnl[t] || { unrealized: 0, daily: 0, stockQty: 0, optionCount: 0 };
                     const hasStock = pnl.stockQty !== 0;
                     const hasOptions = pnl.optionCount > 0;
-                    const hasPositions = hasStock || hasOptions;
-                    const isWatchlistOnly = !hasPositions && watchlistTickers.includes(t);
                     
                     return (
                       <div 
@@ -1815,9 +1723,7 @@ export function PayoffDashboard() {
                         className={`p-3 rounded-lg cursor-pointer transition-colors ${
                           selectedTicker === t 
                             ? "bg-orange-500/20 border border-orange-500/50" 
-                            : isWatchlistOnly 
-                              ? "bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20"
-                              : "bg-white/5 border border-transparent hover:bg-white/10"
+                            : "bg-white/5 border border-transparent hover:bg-white/10"
                         }`}
                         onClick={() => setSelectedTicker(t)}
                       >
@@ -1850,78 +1756,25 @@ export function PayoffDashboard() {
                           <div className="flex gap-1 text-[10px] items-center">
                             {hasStock && <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{pnl.stockQty > 0 ? '+' : ''}{pnl.stockQty}</span>}
                             {hasOptions && <span className="px-1.5 py-0.5 rounded bg-purple-900/50 text-purple-300">{pnl.optionCount} opt</span>}
-                            {isWatchlistOnly && (
-                              <>
-                                <span className="px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-300">Watchlist</span>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    removeFromWatchlist(t).then(setWatchlistTickers);
-                                  }}
-                                  className="ml-1 text-gray-500 hover:text-red-400 text-sm"
-                                  title="Remove from watchlist"
-                                >
-                                  ×
-                                </button>
-                              </>
-                            )}
                           </div>
                         </div>
-                        {hasPositions && (
-                          <div className="flex justify-between mt-2 text-xs">
-                            <div>
-                              <div className="text-gray-500">Unrealized</div>
-                              <div className={pnl.unrealized >= 0 ? "text-green-400" : "text-red-400"}>
-                                {pnl.unrealized >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.unrealized)}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-gray-500">Today</div>
-                              <div className={pnl.daily >= 0 ? "text-green-400" : "text-red-400"}>
-                                {pnl.daily >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.daily)}
-                              </div>
+                        <div className="flex justify-between mt-2 text-xs">
+                          <div>
+                            <div className="text-gray-500">Unrealized</div>
+                            <div className={pnl.unrealized >= 0 ? "text-green-400" : "text-red-400"}>
+                              {pnl.unrealized >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.unrealized)}
                             </div>
                           </div>
-                        )}
-                        {/* Watchlist ticker: show daily change % */}
-                        {isWatchlistOnly && (snapshotCache[t] || stockPrices[t]) && (
-                          <div className="flex justify-between mt-2 text-xs">
-                            <div>
-                              <div className="text-gray-500">Price</div>
-                              <div className="text-white">
-                                ${(stockPrices[t] || snapshotCache[t]?.current_price)?.toFixed(2) || '-'}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-gray-500">Today</div>
-                              <div className={(snapshotCache[t]?.change_pct || 0) >= 0 ? "text-green-400" : "text-red-400"}>
-                                {(snapshotCache[t]?.change_pct || 0) >= 0 ? '+' : ''}{(snapshotCache[t]?.change_pct || 0).toFixed(2)}%
-                              </div>
+                          <div className="text-right">
+                            <div className="text-gray-500">Today</div>
+                            <div className={pnl.daily >= 0 ? "text-green-400" : "text-red-400"}>
+                              {pnl.daily >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.daily)}
                             </div>
                           </div>
-                        )}
+                        </div>
                       </div>
                     );
                   })}
-                  
-                  {/* Add Ticker Input */}
-                  <div className="mt-2 pt-2 border-t border-white/10">
-                    <form onSubmit={(e) => {
-                      e.preventDefault();
-                      if (newTickerInput.trim()) {
-                        addToWatchlist(newTickerInput.trim()).then(setWatchlistTickers);
-                        setNewTickerInput("");
-                      }
-                    }}>
-                      <Input
-                        type="text"
-                        placeholder="Add ticker..."
-                        value={newTickerInput}
-                        onChange={(e) => setNewTickerInput(e.target.value.toUpperCase())}
-                        className="bg-white/5 border-white/10 text-white placeholder:text-gray-500 h-8 text-xs"
-                      />
-                    </form>
-                  </div>
                </CardContent>
             </Card>
 
