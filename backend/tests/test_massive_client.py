@@ -280,6 +280,141 @@ class TestGetNews:
         assert len(result["headlines"]) <= 5
 
 
+class TestNewsHelperFunctions:
+    """Tests for internal news helper functions."""
+    
+    def test_parse_benzinga_article_extracts_fields(self):
+        from backend.massive_client import _parse_benzinga_article
+        
+        article = MockNewsArticle(
+            benzinga_id="12345",
+            title="Test Article Title",
+            published="2026-01-14T10:00:00Z",
+            teaser="Short teaser",
+            body="Full body content",
+            url="https://benzinga.com/article/12345"
+        )
+        article.images = ["https://cdn.benzinga.com/image1.jpg", "https://cdn.benzinga.com/image2.jpg"]
+        
+        result = _parse_benzinga_article(article)
+        
+        assert result["articleId"] == "12345"
+        assert result["headline"] == "Test Article Title"
+        assert result["providerCode"] == "BZ"
+        assert result["providerName"] == "Benzinga"
+        assert result["time"] == "2026-01-14T10:00:00Z"
+        assert result["teaser"] == "Short teaser"
+        assert result["body"] == "Full body content"
+        assert result["url"] == "https://benzinga.com/article/12345"
+        assert result["imageUrl"] == "https://cdn.benzinga.com/image1.jpg"  # First image
+    
+    def test_parse_benzinga_article_handles_no_images(self):
+        from backend.massive_client import _parse_benzinga_article
+        
+        article = MockNewsArticle("12345", "Title", "2026-01-14T10:00:00Z")
+        # No images attribute
+        
+        result = _parse_benzinga_article(article)
+        
+        assert result["imageUrl"] is None
+    
+    def test_parse_reference_article_extracts_fields(self):
+        from backend.massive_client import _parse_reference_article
+        
+        article = MockRefNewsArticle(
+            article_id="abc123",
+            title="Reference Article Title",
+            published_utc="2026-01-14T09:00:00Z",
+            description="Article description"
+        )
+        article.image_url = "https://example.com/image.jpg"
+        
+        result = _parse_reference_article(article)
+        
+        assert result["articleId"] == "abc123"
+        assert result["headline"] == "Reference Article Title"
+        assert result["providerCode"] == "TES"  # First 3 letters of "Test Publisher"
+        assert result["providerName"] == "Test Publisher"
+        assert result["time"] == "2026-01-14T09:00:00Z"
+        assert result["teaser"] == "Article description"
+        assert result["imageUrl"] == "https://example.com/image.jpg"
+    
+    def test_parse_reference_article_creates_provider_code(self):
+        from backend.massive_client import _parse_reference_article
+        
+        article = MockRefNewsArticle("id1", "Title", "2026-01-14T10:00:00Z")
+        article.publisher.name = "Investing.com"
+        
+        result = _parse_reference_article(article)
+        
+        # Provider code should be first 3 alpha chars, uppercased
+        assert result["providerCode"] == "INV"
+
+
+class TestGetMarketNews:
+    """Tests for get_market_news function."""
+    
+    def test_fetches_news_from_multiple_tickers(self, mock_massive_client):
+        from backend.massive_client import get_market_news
+        
+        # Setup Benzinga mock
+        benzinga_articles = [
+            MockNewsArticle("bz1", "Market Headline 1", "2026-01-14T10:00:00Z"),
+        ]
+        mock_massive_client.list_benzinga_news_v2.return_value = iter(benzinga_articles)
+        mock_massive_client.list_ticker_news.return_value = iter([])
+        
+        result = get_market_news(limit=10)
+        
+        # Should have called for each market ticker (SPY, QQQ, DIA)
+        assert mock_massive_client.list_benzinga_news_v2.call_count == 3
+        assert mock_massive_client.list_ticker_news.call_count == 3
+        assert "headlines" in result
+    
+    def test_deduplicates_headlines(self, mock_massive_client):
+        from backend.massive_client import get_market_news
+        
+        # Same headline from different tickers (market-wide news)
+        benzinga_articles = [
+            MockNewsArticle("bz1", "Duplicate Market Headline", "2026-01-14T10:00:00Z"),
+        ]
+        
+        # Each call returns same headline (simulating same news for SPY, QQQ, DIA)
+        mock_massive_client.list_benzinga_news_v2.return_value = iter(benzinga_articles)
+        mock_massive_client.list_ticker_news.return_value = iter([])
+        
+        result = get_market_news(limit=10)
+        
+        # Deduplication should prevent multiple copies
+        unique_headlines = set(h["headline"] for h in result["headlines"])
+        assert len(unique_headlines) == len(result["headlines"])
+    
+    def test_respects_limit(self, mock_massive_client):
+        from backend.massive_client import get_market_news
+        
+        # Many articles
+        benzinga_articles = [
+            MockNewsArticle(f"bz{i}", f"Headline {i}", f"2026-01-14T{10+i}:00:00Z")
+            for i in range(20)
+        ]
+        mock_massive_client.list_benzinga_news_v2.return_value = iter(benzinga_articles)
+        mock_massive_client.list_ticker_news.return_value = iter([])
+        
+        result = get_market_news(limit=5)
+        
+        assert len(result["headlines"]) <= 5
+    
+    def test_returns_empty_when_no_client(self):
+        """Test that function handles missing API client gracefully."""
+        from backend.massive_client import get_market_news
+        
+        with patch('backend.massive_client._client', None):
+            result = get_market_news(limit=10)
+        
+        assert result["headlines"] == []
+        assert "error" in result
+
+
 class TestGetOptionsChainStrikeKeys:
     """Tests for options chain strike key serialization.
     
