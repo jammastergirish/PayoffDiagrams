@@ -389,32 +389,38 @@ def get_cache_stats():
 # LLM Analysis Routes
 # ==================
 
+class ArticleForAnalysis(BaseModel):
+    headline: str
+    body: str | None = None
+
 class MarketNewsAnalysisRequest(BaseModel):
-    headlines: list[str]
+    articles: list[ArticleForAnalysis]
     tickers: list[str]
 
 class TickerNewsAnalysisRequest(BaseModel):
-    headlines: list[str]
+    articles: list[ArticleForAnalysis]
     ticker: str
 
 
 @app.post("/api/llm/analyze-market-news")
 def llm_analyze_market_news(request: MarketNewsAnalysisRequest):
     """
-    Analyze market news headlines for portfolio impact using LLM.
+    Analyze market news articles for portfolio impact using LLM.
     
-    Returns AI-generated summary of how headlines affect the portfolio.
+    Returns AI-generated summary of how articles affect the portfolio.
     """
-    result = analyze_market_news(request.headlines, request.tickers)
+    articles = [a.model_dump() for a in request.articles]
+    result = analyze_market_news(articles, request.tickers)
     return result
 
 
 @app.post("/api/llm/analyze-ticker-news")
 def llm_analyze_ticker_news(request: TickerNewsAnalysisRequest):
     """
-    Analyze news headlines for a specific ticker using LLM.
+    Analyze news articles for a specific ticker using LLM.
     
-    Returns AI-generated summary of how headlines affect the stock.
+    Returns AI-generated summary of how articles affect the stock.
     """
-    result = analyze_ticker_news(request.headlines, request.ticker)
+    articles = [a.model_dump() for a in request.articles]
+    result = analyze_ticker_news(articles, request.ticker)
     return result

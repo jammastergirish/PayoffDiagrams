@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TradeCraft",
+  title: "TradeShape",
   description: "Personalized trading dashboard for Interactive Brokers",
 };
 

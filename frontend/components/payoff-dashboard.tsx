@@ -25,6 +25,7 @@ import { NewsItemList } from "@/components/news-item-list";
 import { CandlestickChart } from "@/components/candlestick-chart";
 import { useToast } from "@/components/ui/toast";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
+import ReactMarkdown from "react-markdown";
 
 import {
   Select,
@@ -701,17 +702,23 @@ export function PayoffDashboard() {
       setMarketNewsAnalysisLoading(true);
       
       try {
-        const headlines = currentHeadlines.map(h => h.headline);
+        // Prepare articles with full content for deeper analysis
+        const articles = currentHeadlines.map(h => ({
+          headline: h.headline,
+          body: h.body
+        }));
         // Get tickers at analysis time (not from dependency)
         const tickers = [...new Set(positions.map(p => p.ticker))];
         
-        // Store the prompt for "View Prompt" feature
-        const headlinesStr = headlines.map(h => `- ${h}`).join("\n");
+        // Store the prompt for "View Prompt" feature (show full articles)
+        const articlesStr = articles.map((a, i) => {
+          return a.body ? `${i + 1}. ${a.headline}\n${a.body}` : `${i + 1}. ${a.headline}`;
+        }).join("\n\n");
         const tickersStr = tickers.join(", ") || "general market";
-        const prompt = `What do these top headlines today mean for my investments (${tickersStr})? Give a summary in 100 words.\n\nHeadlines:\n${headlinesStr}`;
+        const prompt = `Based on these news articles, what are the key market-moving insights for my investments (${tickersStr})? Give a summary in 150 words.\n\nArticles:\n${articlesStr}`;
         setMarketNewsPrompt(prompt);
         
-        const result = await fetchMarketNewsAnalysis(headlines, tickers);
+        const result = await fetchMarketNewsAnalysis(articles, tickers);
         if (result.summary) {
           setMarketNewsAnalysis(result.summary);
         } else if (result.error) {
@@ -759,14 +766,20 @@ export function PayoffDashboard() {
       setTickerNewsAnalysisLoading(true);
       
       try {
-        const headlines = currentHeadlines.map(h => h.headline);
+        // Prepare articles with full content for deeper analysis
+        const articles = currentHeadlines.map(h => ({
+          headline: h.headline,
+          body: h.body
+        }));
         
-        // Store the prompt for "View Prompt" feature
-        const headlinesStr = headlines.map(h => `- ${h}`).join("\n");
-        const prompt = `What do these recent news headlines mean for ${currentTicker.toUpperCase()} stock? Give a summary in 100 words focusing on potential price impact.\n\nHeadlines:\n${headlinesStr}`;
+        // Store the prompt for "View Prompt" feature (show full articles)
+        const articlesStr = articles.map((a, i) => {
+          return a.body ? `${i + 1}. ${a.headline}\n${a.body}` : `${i + 1}. ${a.headline}`;
+        }).join("\n\n");
+        const prompt = `Based on these news articles about ${currentTicker.toUpperCase()}, what is the likely price impact? Give a summary in 150 words.\n\nArticles:\n${articlesStr}`;
         setTickerNewsPrompt(prompt);
         
-        const result = await fetchTickerNewsAnalysis(headlines, currentTicker);
+        const result = await fetchTickerNewsAnalysis(articles, currentTicker);
         if (result.summary) {
           setTickerNewsAnalysis(result.summary);
         } else if (result.error) {
@@ -1304,11 +1317,11 @@ export function PayoffDashboard() {
 
        {positions.length > 0 && (
           <div className="flex flex-col gap-6">
-            {/* Header with TradeCraft + Key Metrics inline */}
+            {/* Header with TradeShape + Key Metrics inline */}
       <div className="flex items-center justify-between border-b border-white/10 pb-4 gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <h1 className="text-3xl font-extrabold tracking-tight text-white">
-            Trade<span className="text-orange-500">Craft</span>
+            Trade<span className="text-orange-500">Shape</span>
           </h1>
           {/* Privacy Mode Toggle */}
           <button
@@ -1352,14 +1365,14 @@ export function PayoffDashboard() {
               <>
                 {/* Net Liq - first */}
                 {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Net Liq</div>
                     <div className="text-lg font-bold text-white">
                       {formatPrivateCurrency(accountSummaries[selectedAccount].net_liquidation)}
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Total Net Liq</div>
                     <div className="text-lg font-bold text-white">
                       {formatPrivateCurrency(totalNetLiq)}
@@ -1368,7 +1381,7 @@ export function PayoffDashboard() {
                 )}
                 
                 {/* YTD % - second */}
-                <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                   <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">YTD %</div>
                   <div className={`text-lg font-bold ${ytdPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                     {ytdPct >= 0 ? '+' : ''}{ytdPct.toFixed(1)}%
@@ -1377,14 +1390,14 @@ export function PayoffDashboard() {
                 
                 {/* Today - third */}
                 {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].daily_pnl)}
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatPrivateCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
@@ -1394,14 +1407,14 @@ export function PayoffDashboard() {
                 
                 {/* Realized - fourth */}
                 {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
                     <div className={`text-lg font-bold ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].realized_pnl)}
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
                     <div className={`text-lg font-bold ${totalRealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {totalRealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(totalRealizedPnl)}
@@ -1413,7 +1426,7 @@ export function PayoffDashboard() {
           })()}
           
           {/* Unrealized - fifth */}
-          <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+          <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
             <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Unrealized</div>
             <div className={`text-lg font-bold ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(portfolioUnrealizedPnl)}
@@ -1426,7 +1439,7 @@ export function PayoffDashboard() {
               ? accountSummaries[selectedAccount].buying_power || 0
               : Object.values(accountSummaries).reduce((sum, s) => sum + (s.buying_power || 0), 0);
             return totalBuyingPower > 0 ? (
-              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
+              <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                 <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Buying Power</div>
                 <div className="text-lg font-bold text-cyan-400">
                   {formatPrivateCurrency(totalBuyingPower)}
@@ -1474,7 +1487,9 @@ export function PayoffDashboard() {
                       <span className="animate-spin">⏳</span> Analyzing headlines for your portfolio...
                     </p>
                   ) : (
-                    <p className="text-sm text-gray-300 leading-relaxed">{marketNewsAnalysis}</p>
+                    <div className="text-sm text-gray-300 leading-relaxed prose prose-invert prose-sm max-w-none">
+                      <ReactMarkdown>{marketNewsAnalysis}</ReactMarkdown>
+                    </div>
                   )}
                 </div>
               )}
@@ -1919,7 +1934,9 @@ export function PayoffDashboard() {
                               <span className="animate-spin">⏳</span> Analyzing headlines for {selectedTicker}...
                             </p>
                           ) : (
-                            <p className="text-sm text-gray-300 leading-relaxed">{tickerNewsAnalysis}</p>
+                            <div className="text-sm text-gray-300 leading-relaxed prose prose-invert prose-sm max-w-none">
+                              <ReactMarkdown>{tickerNewsAnalysis}</ReactMarkdown>
+                            </div>
                           )}
                         </div>
                       )}

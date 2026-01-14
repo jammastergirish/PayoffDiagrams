@@ -1,11 +1,12 @@
 """
-OpenAI LLM Client for TradeCraft.
+OpenAI LLM Client for TradeShape.
 
 Centralized module for making LLM calls to analyze news and provide portfolio insights.
 """
 
 import os
 from typing import Optional
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,23 +28,36 @@ else:
 
 # Default configuration
 DEFAULT_MODEL = "gpt-4o-mini"
-DEFAULT_MAX_TOKENS = 200
+DEFAULT_MAX_TOKENS = 300
 DEFAULT_TEMPERATURE = 0.7
-MAX_HEADLINES = 10
+MAX_ARTICLES = 10
 
 
-def _format_headlines(headlines: list[str]) -> str:
-    """Format headlines list as bullet points."""
-    return "\n".join(f"- {h}" for h in headlines[:MAX_HEADLINES])
+class NewsArticle(BaseModel):
+    """Article data for LLM analysis."""
+    headline: str
+    body: Optional[str] = None
 
 
-def _call_openai(system_prompt: str, user_prompt: str) -> dict:
+def _format_articles(articles: list[NewsArticle]) -> str:
+    """Format articles with headline and full body as numbered list."""
+    formatted = []
+    for i, article in enumerate(articles[:MAX_ARTICLES], 1):
+        if article.body:
+            formatted.append(f"{i}. {article.headline}\n{article.body}")
+        else:
+            formatted.append(f"{i}. {article.headline}")
+    return "\n\n".join(formatted)
+
+
+def _call_openai(system_prompt: str, user_prompt: str, max_tokens: int = DEFAULT_MAX_TOKENS) -> dict:
     """
     Make an OpenAI chat completion call.
     
     Args:
         system_prompt: The system message for context
         user_prompt: The user message/question
+        max_tokens: Maximum tokens in response
         
     Returns:
         Dict with 'summary' string or 'error' if failed
@@ -58,7 +72,7 @@ def _call_openai(system_prompt: str, user_prompt: str) -> dict:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=DEFAULT_MAX_TOKENS,
+            max_tokens=max_tokens,
             temperature=DEFAULT_TEMPERATURE,
         )
         
@@ -70,55 +84,61 @@ def _call_openai(system_prompt: str, user_prompt: str) -> dict:
         return {"error": str(e)}
 
 
-def analyze_market_news(headlines: list[str], tickers: list[str]) -> dict:
+def analyze_market_news(articles: list[dict], tickers: list[str]) -> dict:
     """
-    Analyze market news headlines for portfolio impact.
+    Analyze market news articles for portfolio impact.
     
     Args:
-        headlines: List of news headline strings (max 10)
+        articles: List of article dicts with headline and body
         tickers: List of ticker symbols in the portfolio
         
     Returns:
         Dict with 'summary' string or 'error' if failed
     """
-    if not headlines:
-        return {"error": "No headlines provided"}
+    if not articles:
+        return {"error": "No articles provided"}
+    
+    # Convert to NewsArticle objects
+    news_articles = [NewsArticle(**a) if isinstance(a, dict) else a for a in articles]
     
     tickers_str = ", ".join(tickers) if tickers else "general market"
-    headlines_str = _format_headlines(headlines)
+    articles_str = _format_articles(news_articles)
     
     system_prompt = "You are a financial analyst providing brief, actionable insights on how news affects stock portfolios. Be concise and direct."
-    user_prompt = f"""What do these top headlines today mean for my investments ({tickers_str})? Give a summary in 100 words.
+    user_prompt = f"""Based on these news articles, what are the key market-moving insights for my investments ({tickers_str})? Give a summary in 150 words.
 
-Headlines:
-{headlines_str}"""
+Articles:
+{articles_str}"""
 
-    return _call_openai(system_prompt, user_prompt)
+    return _call_openai(system_prompt, user_prompt, max_tokens=300)
 
 
-def analyze_ticker_news(headlines: list[str], ticker: str) -> dict:
+def analyze_ticker_news(articles: list[dict], ticker: str) -> dict:
     """
-    Analyze news headlines for a specific ticker.
+    Analyze news articles for a specific ticker.
     
     Args:
-        headlines: List of news headline strings (max 10)
+        articles: List of article dicts with headline and body
         ticker: Stock ticker symbol (e.g., "AAPL")
         
     Returns:
         Dict with 'summary' string or 'error' if failed
     """
-    if not headlines:
-        return {"error": "No headlines provided"}
+    if not articles:
+        return {"error": "No articles provided"}
     
     if not ticker:
         return {"error": "No ticker provided"}
     
-    headlines_str = _format_headlines(headlines)
+    # Convert to NewsArticle objects
+    news_articles = [NewsArticle(**a) if isinstance(a, dict) else a for a in articles]
+    
+    articles_str = _format_articles(news_articles)
     
     system_prompt = "You are a financial analyst providing brief, actionable insights on how news affects individual stocks. Be concise and direct about potential price impact."
-    user_prompt = f"""What do these recent news headlines mean for {ticker.upper()} stock? Give a summary in 100 words focusing on potential price impact.
+    user_prompt = f"""Based on these news articles about {ticker.upper()}, what is the likely price impact? Give a summary in 150 words.
 
-Headlines:
-{headlines_str}"""
+Articles:
+{articles_str}"""
 
-    return _call_openai(system_prompt, user_prompt)
+    return _call_openai(system_prompt, user_prompt, max_tokens=300)

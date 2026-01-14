@@ -1,4 +1,4 @@
-# TradeCraft
+# TradeShape
 
 <img width="796" height="454" alt="Screenshot 2026-01-05 at 10 12 03" src="https://github.com/user-attachments/assets/bea2750f-0be4-4d8a-bb6e-d1a5c433e8d5" />
 

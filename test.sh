@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run all tests for TradeCraft
+# Run all tests for TradeShape
 
 set -e
 

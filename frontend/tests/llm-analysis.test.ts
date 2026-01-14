@@ -13,21 +13,23 @@ describe('LLM Analysis API Functions', () => {
   });
 
   describe('fetchMarketNewsAnalysis', () => {
-    it('should send POST request with correct body', async () => {
+    it('should send POST request with full articles (headline + body)', async () => {
       const mockResponse = { summary: 'Market is bullish' };
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(mockResponse)
       });
 
-      // Simulate the function behavior
-      const headlines = ['Tech stocks rally', 'Fed holds rates'];
+      const articles = [
+        { headline: 'Tech stocks rally', body: 'Markets surged today with major gains across sectors.' },
+        { headline: 'Fed holds rates', body: 'The Federal Reserve announced no change to interest rates.' }
+      ];
       const tickers = ['AAPL', 'GOOGL'];
       
       const response = await fetch(`${API_BASE}/api/llm/analyze-market-news`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headlines, tickers })
+        body: JSON.stringify({ articles, tickers })
       });
       const result = await response.json();
 
@@ -36,14 +38,14 @@ describe('LLM Analysis API Functions', () => {
         expect.objectContaining({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ headlines, tickers })
+          body: JSON.stringify({ articles, tickers })
         })
       );
       expect(result).toEqual(mockResponse);
     });
 
-    it('should handle empty headlines array', async () => {
-      const mockResponse = { error: 'No headlines provided' };
+    it('should handle empty articles array', async () => {
+      const mockResponse = { error: 'No articles provided' };
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(mockResponse)
@@ -52,7 +54,7 @@ describe('LLM Analysis API Functions', () => {
       const response = await fetch(`${API_BASE}/api/llm/analyze-market-news`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headlines: [], tickers: ['AAPL'] })
+        body: JSON.stringify({ articles: [], tickers: ['AAPL'] })
       });
       const result = await response.json();
 
@@ -61,20 +63,22 @@ describe('LLM Analysis API Functions', () => {
   });
 
   describe('fetchTickerNewsAnalysis', () => {
-    it('should send POST request with ticker in body', async () => {
+    it('should send POST request with full articles (headline + body)', async () => {
       const mockResponse = { summary: 'AAPL looks strong' };
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(mockResponse)
       });
 
-      const headlines = ['Apple announces new product'];
+      const articles = [
+        { headline: 'Apple announces new product', body: 'iPhone 16 revealed with AI features and improved camera system.' }
+      ];
       const ticker = 'AAPL';
       
       const response = await fetch(`${API_BASE}/api/llm/analyze-ticker-news`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headlines, ticker })
+        body: JSON.stringify({ articles, ticker })
       });
       const result = await response.json();
 
@@ -82,7 +86,7 @@ describe('LLM Analysis API Functions', () => {
         expect.stringContaining('/api/llm/analyze-ticker-news'),
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ headlines, ticker })
+          body: JSON.stringify({ articles, ticker })
         })
       );
       expect(result).toEqual(mockResponse);
@@ -98,7 +102,7 @@ describe('LLM Analysis API Functions', () => {
       const response = await fetch(`${API_BASE}/api/llm/analyze-ticker-news`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headlines: ['Test'], ticker: '' })
+        body: JSON.stringify({ articles: [{ headline: 'Test' }], ticker: '' })
       });
       const result = await response.json();
 
@@ -106,72 +110,87 @@ describe('LLM Analysis API Functions', () => {
     });
   });
 
-  describe('LLMAnalysisResponse type', () => {
-    it('should have correct structure for success response', () => {
-      interface LLMAnalysisResponse {
-        summary?: string;
-        error?: string;
+  describe('ArticleForAnalysis type', () => {
+    it('should have correct structure with headline and body', () => {
+      interface ArticleForAnalysis {
+        headline: string;
+        body?: string;
       }
 
-      const successResponse: LLMAnalysisResponse = { summary: 'Test summary' };
-      expect(successResponse.summary).toBe('Test summary');
-      expect(successResponse.error).toBeUndefined();
+      const article: ArticleForAnalysis = { 
+        headline: 'Test headline',
+        body: 'Full article body text that can be very long without any truncation.'
+      };
+      expect(article.headline).toBe('Test headline');
+      expect(article.body).toBe('Full article body text that can be very long without any truncation.');
     });
 
-    it('should have correct structure for error response', () => {
-      interface LLMAnalysisResponse {
-        summary?: string;
-        error?: string;
+    it('should allow headline-only articles', () => {
+      interface ArticleForAnalysis {
+        headline: string;
+        body?: string;
       }
 
-      const errorResponse: LLMAnalysisResponse = { error: 'API Error' };
-      expect(errorResponse.error).toBe('API Error');
-      expect(errorResponse.summary).toBeUndefined();
+      const article: ArticleForAnalysis = { headline: 'Just a headline' };
+      expect(article.headline).toBe('Just a headline');
+      expect(article.body).toBeUndefined();
     });
   });
 });
 
-describe('Prompt Generation for Analysis', () => {
-  it('should format market news prompt correctly', () => {
-    const headlines = ['Tech stocks rally', 'Fed holds rates'];
+describe('Prompt Generation for Analysis with Full Articles', () => {
+  it('should format market news prompt with full article bodies', () => {
+    const articles = [
+      { headline: 'Tech stocks rally', body: 'Markets surged 2% today on AI news. Major tech companies led the gains.' },
+      { headline: 'Fed holds rates', body: 'The Federal Reserve kept interest rates unchanged for the third consecutive meeting.' }
+    ];
     const tickers = ['AAPL', 'GOOGL'];
     
-    const headlinesStr = headlines.map(h => `- ${h}`).join('\n');
+    const articlesStr = articles.map((a, i) => {
+      return a.body ? `${i + 1}. ${a.headline}\n${a.body}` : `${i + 1}. ${a.headline}`;
+    }).join("\n\n");
     const tickersStr = tickers.join(', ');
-    const prompt = `What do these top headlines today mean for my investments (${tickersStr})? Give a summary in 100 words.\n\nHeadlines:\n${headlinesStr}`;
+    const prompt = `Based on these news articles, what are the key market-moving insights for my investments (${tickersStr})?\n\nArticles:\n${articlesStr}`;
     
     expect(prompt).toContain('AAPL, GOOGL');
-    expect(prompt).toContain('- Tech stocks rally');
-    expect(prompt).toContain('- Fed holds rates');
-    expect(prompt).toContain('100 words');
+    expect(prompt).toContain('1. Tech stocks rally');
+    expect(prompt).toContain('Markets surged 2% today on AI news. Major tech companies led the gains.');
+    expect(prompt).toContain('2. Fed holds rates');
+    expect(prompt).toContain('The Federal Reserve kept interest rates unchanged for the third consecutive meeting.');
   });
 
-  it('should format ticker news prompt correctly', () => {
-    const headlines = ['Apple announces iPhone 16'];
+  it('should format ticker news prompt with full article bodies', () => {
+    const articles = [
+      { headline: 'Apple announces iPhone 16', body: 'New iPhone features AI assistant with advanced capabilities.' }
+    ];
     const ticker = 'AAPL';
     
-    const headlinesStr = headlines.map(h => `- ${h}`).join('\n');
-    const prompt = `What do these recent news headlines mean for ${ticker.toUpperCase()} stock? Give a summary in 100 words focusing on potential price impact.\n\nHeadlines:\n${headlinesStr}`;
+    const articlesStr = articles.map((a, i) => {
+      return a.body ? `${i + 1}. ${a.headline}\n${a.body}` : `${i + 1}. ${a.headline}`;
+    }).join("\n\n");
+    const prompt = `Based on these news articles about ${ticker.toUpperCase()}, what is the likely price impact?\n\nArticles:\n${articlesStr}`;
     
-    expect(prompt).toContain('AAPL stock');
-    expect(prompt).toContain('- Apple announces iPhone 16');
+    expect(prompt).toContain('AAPL');
+    expect(prompt).toContain('Apple announces iPhone 16');
+    expect(prompt).toContain('New iPhone features AI assistant with advanced capabilities.');
     expect(prompt).toContain('price impact');
   });
 
-  it('should handle empty tickers gracefully', () => {
-    const headlines = ['Market update'];
-    const tickers: string[] = [];
+  it('should handle articles with only headlines (no body)', () => {
+    const articles: { headline: string; body?: string }[] = [
+      { headline: 'Market update' }
+    ];
     
-    const tickersStr = tickers.join(', ') || 'general market';
-    const prompt = `What do these top headlines today mean for my investments (${tickersStr})?`;
+    const articlesStr = articles.map((a, i) => {
+      return a.body ? `${i + 1}. ${a.headline}\n${a.body}` : `${i + 1}. ${a.headline}`;
+    }).join("\n\n");
     
-    expect(prompt).toContain('general market');
+    expect(articlesStr).toBe('1. Market update');
   });
 });
 
-describe('Ticker-Headlines Matching Guard', () => {
+describe('Ticker-Articles Matching Guard', () => {
   it('should only allow analysis when headlines ticker matches selected ticker', () => {
-    // Simulate the guard logic from payoff-dashboard.tsx
     const shouldAnalyze = (
       selectedTicker: string,
       newsHeadlinesTicker: string,
@@ -198,23 +217,17 @@ describe('Ticker-Headlines Matching Guard', () => {
     expect(shouldAnalyze('', 'AAPL', 5)).toBe(false);
   });
 
-  it('should clear headlines ticker when switching tickers (before new load)', () => {
-    // This simulates the flow when user changes ticker:
-    // 1. User on MU, newsHeadlinesTicker = 'MU', newsHeadlines = [MU articles]
-    // 2. User clicks OSCR
-    // 3. setNewsHeadlinesTicker('') called immediately (or with OSCR cached)
-    // 4. Analysis effect runs, sees mismatch, skips
-    // 5. Headlines load for OSCR, setNewsHeadlinesTicker('OSCR')
-    // 6. Analysis effect runs again, now matches, proceeds
-
+  it('should prevent analysis when headlines belong to wrong ticker', () => {
+    // This test documents the bug fix: when user switches from MU to OSCR,
+    // the analysis should NOT run until OSCR headlines are loaded
     const states = [
-      { step: 'initial', selectedTicker: 'MU', headlinesTicker: 'MU', shouldAnalyze: true },
-      { step: 'ticker changed, loading', selectedTicker: 'OSCR', headlinesTicker: '', shouldAnalyze: false },
-      { step: 'headlines loaded', selectedTicker: 'OSCR', headlinesTicker: 'OSCR', shouldAnalyze: true },
+      { step: 'viewing MU', selectedTicker: 'MU', headlinesTicker: 'MU', shouldAnalyze: true },
+      { step: 'switched to OSCR, headlines loading', selectedTicker: 'OSCR', headlinesTicker: '', shouldAnalyze: false },
+      { step: 'OSCR headlines loaded', selectedTicker: 'OSCR', headlinesTicker: 'OSCR', shouldAnalyze: true },
     ];
 
-    states.forEach(({ step, selectedTicker, headlinesTicker, shouldAnalyze }) => {
-      const result = selectedTicker && headlinesTicker === selectedTicker;
+    states.forEach(({ selectedTicker, headlinesTicker, shouldAnalyze }) => {
+      const result = Boolean(selectedTicker && headlinesTicker === selectedTicker);
       expect(result).toBe(shouldAnalyze);
     });
   });

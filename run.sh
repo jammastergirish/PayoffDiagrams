@@ -5,7 +5,7 @@ clear
 # Kill background processes on exit
 trap 'kill $(jobs -p)' EXIT
 
-echo "🚀 Starting TradeCraft..."
+echo "🚀 Starting TradeShape..."
 
 # 1. Start Backend (Python)
 echo "🐍 Starting Backend..."

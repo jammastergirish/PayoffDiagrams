@@ -352,8 +352,13 @@ export interface LLMAnalysisResponse {
     error?: string;
 }
 
+export interface ArticleForAnalysis {
+    headline: string;
+    body?: string;
+}
+
 export async function fetchMarketNewsAnalysis(
-    headlines: string[],
+    articles: ArticleForAnalysis[],
     tickers: string[]
 ): Promise<LLMAnalysisResponse> {
     try {
@@ -363,7 +368,7 @@ export async function fetchMarketNewsAnalysis(
         const res = await fetch(`${API_BASE}/api/llm/analyze-market-news`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ headlines, tickers }),
+            body: JSON.stringify({ articles, tickers }),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -380,7 +385,7 @@ export async function fetchMarketNewsAnalysis(
 }
 
 export async function fetchTickerNewsAnalysis(
-    headlines: string[],
+    articles: ArticleForAnalysis[],
     ticker: string
 ): Promise<LLMAnalysisResponse> {
     try {
@@ -390,7 +395,7 @@ export async function fetchTickerNewsAnalysis(
         const res = await fetch(`${API_BASE}/api/llm/analyze-ticker-news`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ headlines, ticker }),
+            body: JSON.stringify({ articles, ticker }),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
