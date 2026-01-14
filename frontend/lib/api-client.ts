@@ -1,6 +1,9 @@
 import { Position, AccountSummary } from "./payoff-utils";
 
-const API_BASE = "http://localhost:8000";
+// Use current hostname for API calls - works on localhost and LAN
+const API_BASE = typeof window !== 'undefined' 
+    ? `http://${window.location.hostname}:8000`
+    : "http://localhost:8000";
 
 export async function checkBackendHealth(): Promise<{ status: string; ib_connected: boolean } | null> {
     try {

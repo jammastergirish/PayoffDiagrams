@@ -186,6 +186,9 @@ export function PayoffDashboard() {
   const [showCombined, setShowCombined] = useState(true);
   const [showT0, setShowT0] = useState(false);
 
+  // Mobile sidebar state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
   // Simulation State
   const [ivAdjustment, setIvAdjustment] = useState(0); // 0 = 0% change
   const [daysOffset, setDaysOffset] = useState(0); // 0 to 90 days
@@ -1288,16 +1291,18 @@ export function PayoffDashboard() {
 
 
        {isLiveMode && (
-           <div className={`flex items-center gap-2 p-3 rounded-lg text-sm border ${ibConnected ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
-               <div className={`w-2 h-2 rounded-full animate-pulse ${ibConnected ? 'bg-green-500' : 'bg-yellow-500'}`} />
-               {ibConnected ? "Live Connection to IBKR TWS" : "Backend Connected (Waiting for TWS...)"}
-                <div className="ml-auto flex items-center gap-4">
+           <div className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 p-3 rounded-lg text-sm border ${ibConnected ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
+               <div className="flex items-center gap-2">
+                 <div className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${ibConnected ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                 <span className="text-xs sm:text-sm">{ibConnected ? "IBKR Connected" : "Waiting for TWS..."}</span>
+               </div>
+                <div className="flex items-center gap-2 sm:gap-4 sm:ml-auto flex-wrap">
                    {/* Account Selector */}
                    {accounts.length > 0 && (
                        <div className="flex items-center gap-2">
-                           <span className="text-gray-400 text-xs uppercase tracking-wider">Account:</span>
+                           <span className="text-gray-400 text-xs uppercase tracking-wider hidden sm:inline">Account:</span>
                            <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-                             <SelectTrigger className="w-[180px] bg-slate-900 border-white/10 text-white h-8 text-xs">
+                             <SelectTrigger className="w-[140px] sm:w-[180px] bg-slate-900 border-white/10 text-white h-8 text-xs">
                                <SelectValue placeholder="Select Account" />
                              </SelectTrigger>
                              <SelectContent className="bg-slate-900 border-white/10 text-white">
@@ -1309,7 +1314,7 @@ export function PayoffDashboard() {
                            </Select>
                        </div>
                    )}
-                   <span className="text-xs font-mono opacity-70 border-l border-white/10 pl-4">
+                   <span className="text-xs font-mono opacity-70 hidden sm:inline border-l border-white/10 pl-4">
                        {ibConnected ? "CONNECTED" : "Loc: 8000 OK / TWS: --"}
                    </span>
                 </div>
@@ -1329,9 +1334,21 @@ export function PayoffDashboard() {
        {positions.length > 0 && (
           <div className="flex flex-col gap-6">
             {/* Header with TradeShape + Key Metrics inline */}
-      <div className="flex items-center justify-between border-b border-white/10 pb-4 gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <h1 className="text-3xl font-extrabold tracking-tight text-white">
+      <div className="flex items-center justify-between border-b border-white/10 pb-4 gap-2 sm:gap-4 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Hamburger menu for mobile */}
+          <button
+            onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            className="md:hidden p-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+            aria-label="Toggle sidebar"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
             Trade<span className="text-orange-500">Shape</span>
           </h1>
           {/* Privacy Mode Toggle */}
@@ -1359,7 +1376,7 @@ export function PayoffDashboard() {
           </button>
         </div>
         
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:items-center gap-2 sm:gap-3">
           {/* YTD % Return - calculated first for positioning */}
           {accountSummaries && (() => {
             const totalNetLiq = selectedAccount !== 'All' && accountSummaries[selectedAccount]
@@ -1745,9 +1762,37 @@ export function PayoffDashboard() {
         
         {/* Portfolio Detail Tab */}
         <TabsContent value="detail" className="mt-4">
+            {/* Mobile sidebar overlay */}
+            {mobileSidebarOpen && (
+              <div 
+                className="fixed inset-0 bg-black/60 z-40 md:hidden"
+                onClick={() => setMobileSidebarOpen(false)}
+              />
+            )}
+            
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 flex-1 min-h-0">
-            {/* Sidebar */}
-            <Card className="md:col-span-1 bg-slate-950 border-white/10 text-white flex flex-col max-h-[calc(100vh-180px)]">
+            {/* Sidebar - slide out on mobile, normal on desktop */}
+            <Card className={`
+              ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+              md:translate-x-0
+              fixed md:relative
+              left-0 top-0 md:top-auto
+              h-full md:h-auto
+              w-72 md:w-auto
+              z-50 md:z-auto
+              transition-transform duration-300 ease-in-out
+              md:col-span-1 bg-slate-950 border-white/10 text-white flex flex-col max-h-[100vh] md:max-h-[calc(100vh-180px)]
+            `}>
+               {/* Close button for mobile */}
+               <button
+                 onClick={() => setMobileSidebarOpen(false)}
+                 className="md:hidden absolute top-3 right-3 p-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700"
+               >
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                   <line x1="18" y1="6" x2="6" y2="18" />
+                   <line x1="6" y1="6" x2="18" y2="18" />
+                 </svg>
+               </button>
                <CardHeader className="flex-shrink-0">
                  <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Tickers</CardTitle>
                </CardHeader>
@@ -1765,7 +1810,10 @@ export function PayoffDashboard() {
                             ? "bg-orange-500/20 border border-orange-500/50" 
                             : "bg-white/5 border border-transparent hover:bg-white/10"
                         }`}
-                        onClick={() => setSelectedTicker(t)}
+                        onClick={() => {
+                          setSelectedTicker(t);
+                          setMobileSidebarOpen(false); // Close sidebar on mobile
+                        }}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">

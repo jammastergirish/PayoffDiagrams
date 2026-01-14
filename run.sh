@@ -15,7 +15,7 @@ echo "🐍 Starting Backend..."
 lsof -t -i:8000 | xargs kill -9 2>/dev/null || true
 
 # uv automatically handles venv creation and dependency installation
-uv run uvicorn backend.main:app --reload --port 8000 &
+uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # 2. Start Frontend (Next.js)
