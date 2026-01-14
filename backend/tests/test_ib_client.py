@@ -193,3 +193,279 @@ class TestIBClientAccountPnL:
         
         # Should not call reqPnL again
         connected_client.ib.reqPnL.assert_not_called()
+
+
+class TestPlaceOptionsOrder:
+    """Tests for place_options_order method."""
+    
+    @pytest.fixture
+    def mock_trade(self):
+        """Create a mock Trade object."""
+        trade = MagicMock()
+        trade.order.orderId = 12345
+        trade.orderStatus.status = "Submitted"
+        return trade
+    
+    @pytest.fixture
+    def connected_client(self, mock_trade):
+        """Create a connected IBClient with mocked IB."""
+        with patch('backend.ib_client.IB') as MockIB:
+            client = IBClient()
+            client.connected = True
+            client.ib = MockIB.return_value
+            client.ib.isConnected = MagicMock(return_value=True)
+            client.ib.placeOrder = MagicMock(return_value=mock_trade)
+            return client
+    
+    @pytest.fixture
+    def disconnected_client(self):
+        """Create a disconnected IBClient."""
+        with patch('backend.ib_client.IB') as MockIB:
+            client = IBClient()
+            client.connected = False
+            client.ib = MockIB.return_value
+            client.ib.isConnected = MagicMock(return_value=False)
+            return client
+    
+    # ========== Connection Tests ==========
+    
+    def test_returns_error_when_not_connected(self, disconnected_client):
+        """Should return error if not connected to IBKR."""
+        legs = [{"symbol": "AAPL", "expiry": "20260116", "strike": 250, "right": "C", "action": "BUY", "quantity": 1}]
+        result = disconnected_client.place_options_order(legs)
+        
+        assert result["success"] is False
+        assert "Not connected" in result["error"]
+    
+    def test_returns_error_when_ib_disconnected(self, connected_client):
+        """Should return error if ib.isConnected() returns False."""
+        connected_client.ib.isConnected = MagicMock(return_value=False)
+        legs = [{"symbol": "AAPL", "expiry": "20260116", "strike": 250, "right": "C", "action": "BUY", "quantity": 1}]
+        
+        result = connected_client.place_options_order(legs)
+        
+        assert result["success"] is False
+        assert "Not connected" in result["error"]
+    
+    # ========== Input Validation Tests ==========
+    
+    def test_returns_error_for_empty_legs(self, connected_client):
+        """Should return error if no legs provided."""
+        result = connected_client.place_options_order([])
+        
+        assert result["success"] is False
+        assert "No legs provided" in result["error"]
+    
+    def test_returns_error_for_none_legs(self, connected_client):
+        """Should return error if legs is None."""
+        result = connected_client.place_options_order(None)
+        
+        assert result["success"] is False
+        assert "No legs provided" in result["error"]
+    
+    # ========== Single Leg Order Tests ==========
+    
+    def test_places_single_leg_call_order(self, connected_client):
+        """Should successfully place a single-leg call order."""
+        legs = [{
+            "symbol": "AAPL",
+            "expiry": "20260116",
+            "strike": 250,
+            "right": "C",
+            "action": "BUY",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs, order_type="MARKET")
+        
+        assert result["success"] is True
+        assert result["order_id"] == 12345
+        assert result["status"] == "Submitted"
+        connected_client.ib.placeOrder.assert_called_once()
+    
+    def test_places_single_leg_put_order(self, connected_client):
+        """Should successfully place a single-leg put order."""
+        legs = [{
+            "symbol": "SPY",
+            "expiry": "20260117",
+            "strike": 450,
+            "right": "P",
+            "action": "SELL",
+            "quantity": 5
+        }]
+        
+        result = connected_client.place_options_order(legs)
+        
+        assert result["success"] is True
+        assert "SELL" in result["message"]
+        assert "450" in result["message"]
+    
+    def test_normalizes_expiry_with_dashes(self, connected_client):
+        """Should normalize expiry format from YYYY-MM-DD to YYYYMMDD."""
+        legs = [{
+            "symbol": "TSLA",
+            "expiry": "2026-01-16",  # With dashes
+            "strike": 300,
+            "right": "C",
+            "action": "BUY",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs)
+        
+        assert result["success"] is True
+        # Check that the message contains normalized expiry
+        assert "20260116" in result["message"]
+    
+    def test_normalizes_right_from_call_to_c(self, connected_client):
+        """Should normalize 'CALL' to 'C'."""
+        legs = [{
+            "symbol": "AAPL",
+            "expiry": "20260116",
+            "strike": 250,
+            "right": "CALL",  # Full word
+            "action": "BUY",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs)
+        
+        assert result["success"] is True
+        assert "C" in result["message"]
+    
+    def test_normalizes_right_from_put_to_p(self, connected_client):
+        """Should normalize 'PUT' to 'P'."""
+        legs = [{
+            "symbol": "AAPL",
+            "expiry": "20260116",
+            "strike": 250,
+            "right": "PUT",  # Full word
+            "action": "SELL",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs)
+        
+        assert result["success"] is True
+        assert "P" in result["message"]
+    
+    def test_handles_lowercase_inputs(self, connected_client):
+        """Should handle lowercase symbol, right, and action."""
+        legs = [{
+            "symbol": "aapl",
+            "expiry": "20260116",
+            "strike": 250,
+            "right": "c",
+            "action": "buy",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs)
+        
+        assert result["success"] is True
+    
+    # ========== Limit Order Tests ==========
+    
+    def test_places_limit_order_with_price(self, connected_client):
+        """Should place a limit order when limit_price is provided."""
+        legs = [{
+            "symbol": "AAPL",
+            "expiry": "20260116",
+            "strike": 250,
+            "right": "C",
+            "action": "BUY",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs, order_type="LIMIT", limit_price=5.00)
+        
+        assert result["success"] is True
+    
+    def test_returns_error_for_limit_without_price(self, connected_client):
+        """Should return error for LIMIT order without limit_price."""
+        legs = [{
+            "symbol": "AAPL",
+            "expiry": "20260116",
+            "strike": 250,
+            "right": "C",
+            "action": "BUY",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs, order_type="LIMIT", limit_price=None)
+        
+        assert result["success"] is False
+        assert "Limit price required" in result["error"]
+    
+    # ========== Multi-Leg Order Tests ==========
+    
+    def test_places_multi_leg_order_as_separate_orders(self, connected_client, mock_trade):
+        """Should place each leg as a separate order."""
+        legs = [
+            {"symbol": "AAPL", "expiry": "20260116", "strike": 250, "right": "C", "action": "BUY", "quantity": 1},
+            {"symbol": "AAPL", "expiry": "20260116", "strike": 260, "right": "C", "action": "SELL", "quantity": 1}
+        ]
+        
+        result = connected_client.place_options_order(legs, order_type="MARKET")
+        
+        assert result["success"] is True
+        assert "order_ids" in result
+        assert len(result["order_ids"]) == 2
+        assert connected_client.ib.placeOrder.call_count == 2
+    
+    def test_multi_leg_returns_all_order_ids(self, connected_client):
+        """Should return all order IDs for multi-leg orders."""
+        # Setup different order IDs for each call
+        mock_trade1 = MagicMock()
+        mock_trade1.order.orderId = 111
+        mock_trade1.orderStatus.status = "Submitted"
+        
+        mock_trade2 = MagicMock()
+        mock_trade2.order.orderId = 222
+        mock_trade2.orderStatus.status = "Submitted"
+        
+        connected_client.ib.placeOrder = MagicMock(side_effect=[mock_trade1, mock_trade2])
+        
+        legs = [
+            {"symbol": "SPY", "expiry": "20260117", "strike": 450, "right": "P", "action": "BUY", "quantity": 1},
+            {"symbol": "SPY", "expiry": "20260117", "strike": 440, "right": "P", "action": "SELL", "quantity": 1}
+        ]
+        
+        result = connected_client.place_options_order(legs, order_type="MARKET")
+        
+        assert result["success"] is True
+        assert result["order_ids"] == [111, 222]
+        assert "2 orders" in result["message"]
+    
+    def test_multi_leg_normalizes_all_inputs(self, connected_client):
+        """Should normalize inputs for all legs."""
+        legs = [
+            {"symbol": "aapl", "expiry": "2026-01-16", "strike": 250, "right": "call", "action": "buy", "quantity": 1},
+            {"symbol": "aapl", "expiry": "2026-01-16", "strike": 260, "right": "CALL", "action": "SELL", "quantity": 1}
+        ]
+        
+        result = connected_client.place_options_order(legs, order_type="MARKET")
+        
+        assert result["success"] is True
+        # Both legs should show normalized format in message
+        assert "20260116" in result["message"]
+    
+    # ========== Error Handling Tests ==========
+    
+    def test_handles_placeOrder_exception(self, connected_client):
+        """Should handle exceptions from placeOrder gracefully."""
+        connected_client.ib.placeOrder = MagicMock(side_effect=Exception("Connection lost"))
+        
+        legs = [{
+            "symbol": "AAPL",
+            "expiry": "20260116",
+            "strike": 250,
+            "right": "C",
+            "action": "BUY",
+            "quantity": 1
+        }]
+        
+        result = connected_client.place_options_order(legs)
+        
+        assert result["success"] is False
+        assert "Connection lost" in result["error"]
