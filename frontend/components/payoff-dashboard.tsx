@@ -228,6 +228,15 @@ export function PayoffDashboard() {
   // Consolidated vs Unconsolidated toggle
   const [isConsolidated, setIsConsolidated] = useState(true);
   
+  // Privacy Mode - hide absolute dollar values
+  const [privacyMode, setPrivacyMode] = useState(false);
+  
+  // Helper to mask currency values in privacy mode
+  const formatPrivateCurrency = (value: number): string => {
+    if (privacyMode) return '***';
+    return formatCurrency(value);
+  };
+  
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -1205,9 +1214,34 @@ export function PayoffDashboard() {
           <div className="flex flex-col gap-6">
             {/* Header with TradeCraft + Key Metrics inline */}
       <div className="flex items-center justify-between border-b border-white/10 pb-4 gap-4 flex-wrap">
-        <h1 className="text-3xl font-extrabold tracking-tight text-white">
-          Trade<span className="text-orange-500">Craft</span>
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-3xl font-extrabold tracking-tight text-white">
+            Trade<span className="text-orange-500">Craft</span>
+          </h1>
+          {/* Privacy Mode Toggle */}
+          <button
+            onClick={() => setPrivacyMode(!privacyMode)}
+            className={`p-2 rounded-lg transition-colors ${
+              privacyMode 
+                ? 'bg-orange-500/20 text-orange-400 hover:bg-orange-500/30' 
+                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+            }`}
+            title={privacyMode ? 'Show values' : 'Hide values'}
+          >
+            {privacyMode ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            )}
+          </button>
+        </div>
         
         <div className="flex items-center gap-3 flex-wrap">
           {/* YTD % Return - calculated first for positioning */}
@@ -1229,14 +1263,14 @@ export function PayoffDashboard() {
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Net Liq</div>
                     <div className="text-lg font-bold text-white">
-                      {formatCurrency(accountSummaries[selectedAccount].net_liquidation)}
+                      {formatPrivateCurrency(accountSummaries[selectedAccount].net_liquidation)}
                     </div>
                   </div>
                 ) : (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Total Net Liq</div>
                     <div className="text-lg font-bold text-white">
-                      {formatCurrency(totalNetLiq)}
+                      {formatPrivateCurrency(totalNetLiq)}
                     </div>
                   </div>
                 )}
@@ -1254,14 +1288,14 @@ export function PayoffDashboard() {
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].daily_pnl)}
+                      {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].daily_pnl)}
                     </div>
                   </div>
                 ) : (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
+                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatPrivateCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
                     </div>
                   </div>
                 )}
@@ -1271,14 +1305,14 @@ export function PayoffDashboard() {
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
                     <div className={`text-lg font-bold ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatCurrency(accountSummaries[selectedAccount].realized_pnl)}
+                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].realized_pnl)}
                     </div>
                   </div>
                 ) : (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
                     <div className={`text-lg font-bold ${totalRealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {totalRealizedPnl >= 0 ? '+' : ''}{formatCurrency(totalRealizedPnl)}
+                      {totalRealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(totalRealizedPnl)}
                     </div>
                   </div>
                 )}
@@ -1290,7 +1324,7 @@ export function PayoffDashboard() {
           <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
             <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Unrealized</div>
             <div className={`text-lg font-bold ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatCurrency(portfolioUnrealizedPnl)}
+              {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(portfolioUnrealizedPnl)}
             </div>
           </div>
           
@@ -1303,7 +1337,7 @@ export function PayoffDashboard() {
               <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2">
                 <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Buying Power</div>
                 <div className="text-lg font-bold text-cyan-400">
-                  {formatCurrency(totalBuyingPower)}
+                  {formatPrivateCurrency(totalBuyingPower)}
                 </div>
               </div>
             ) : null;
@@ -1452,25 +1486,25 @@ export function PayoffDashboard() {
                             ${s.underlyingPrice.toFixed(2)}
                           </td>
                           <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${s.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {s.unrealizedPnl >= 0 ? '+' : ''}${s.unrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            {s.unrealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(s.unrealizedPnl)}
                           </td>
                           <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${s.unrealizedPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.unrealizedPnlPct >= 0 ? '+' : ''}{s.unrealizedPnlPct.toFixed(1)}%
                           </td>
                           <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${s.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {s.dailyPnl >= 0 ? '+' : ''}${s.dailyPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            {s.dailyPnl >= 0 ? '+' : ''}{formatPrivateCurrency(s.dailyPnl)}
                           </td>
                           <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${s.dailyPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.dailyPnlPct >= 0 ? '+' : ''}{s.dailyPnlPct.toFixed(1)}%
                           </td>
                           <td className="text-right py-2 px-2 font-mono text-gray-300 border-l border-r border-white/10">
-                            ${Math.abs(s.marketValue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            {formatPrivateCurrency(Math.abs(s.marketValue))}
                           </td>
                           <td className="text-right py-2 px-2 font-mono text-red-400">
-                            {Number.isFinite(s.maxLoss) ? `$${Math.abs(s.maxLoss).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
+                            {Number.isFinite(s.maxLoss) ? formatPrivateCurrency(Math.abs(s.maxLoss)) : '∞'}
                           </td>
                           <td className="text-right py-2 px-2 font-mono text-green-400">
-                            {Number.isFinite(s.maxProfit) ? `$${s.maxProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '∞'}
+                            {Number.isFinite(s.maxProfit) ? formatPrivateCurrency(s.maxProfit) : '∞'}
                           </td>
                         </tr>
                       ))
@@ -1705,13 +1739,13 @@ export function PayoffDashboard() {
                             <div>
                               <div className="text-gray-500">Unrealized</div>
                               <div className={pnl.unrealized >= 0 ? "text-green-400" : "text-red-400"}>
-                                {pnl.unrealized >= 0 ? '+' : ''}{formatCurrency(pnl.unrealized)}
+                                {pnl.unrealized >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.unrealized)}
                               </div>
                             </div>
                             <div className="text-right">
                               <div className="text-gray-500">Today</div>
                               <div className={pnl.daily >= 0 ? "text-green-400" : "text-red-400"}>
-                                {pnl.daily >= 0 ? '+' : ''}{formatCurrency(pnl.daily)}
+                                {pnl.daily >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.daily)}
                               </div>
                             </div>
                           </div>
@@ -1784,7 +1818,7 @@ export function PayoffDashboard() {
                       {perTickerPnl[selectedTicker] && (
                         <div className={`flex items-center gap-1 text-sm font-medium ${perTickerPnl[selectedTicker].daily >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                           <span className="text-xl">{perTickerPnl[selectedTicker].daily >= 0 ? '▲' : '▼'}</span>
-                          <span>{perTickerPnl[selectedTicker].daily >= 0 ? '+' : ''}{formatCurrency(perTickerPnl[selectedTicker].daily)}</span>
+                          <span>{perTickerPnl[selectedTicker].daily >= 0 ? '+' : ''}{formatPrivateCurrency(perTickerPnl[selectedTicker].daily)}</span>
                         </div>
                       )}
                     </div>
