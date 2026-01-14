@@ -568,19 +568,15 @@ class IBClient:
                 }
             
             else:
-                # Multi-leg combo orders require conIds which need qualifyContracts()
-                # qualifyContracts() blocks waiting for IB event loop response and hangs
-                # TODO: Implement async version or run in event loop thread
-                return {
-                    "success": False, 
-                    "error": "Multi-leg combo orders are not yet supported. Please place single-leg orders separately."
-                }
+                # Multi-leg orders: Submit each leg as a separate order
+                # Note: True combo orders (BAG) require conIds from qualifyContracts() 
+                # which blocks. This workaround submits legs individually.
+                # For spreads that need atomic execution, consider using TWS directly.
                 
-                # Original multi-leg combo code below - kept for reference
-                # First, qualify each leg contract to get conId
-                combo_legs = []
+                print(f"DEBUG: Multi-leg order with {len(legs)} legs - submitting as separate orders")
                 
-                print(f"DEBUG: Creating combo order with {len(legs)} legs")
+                order_ids = []
+                messages = []
                 
                 for i, leg in enumerate(legs):
                     # Normalize right to single character (C or P)
@@ -605,59 +601,34 @@ class IBClient:
                         currency='USD'
                     )
                     
-                    # Qualify to get conId
-                    qualified = self.ib.qualifyContracts(contract)
-                    if not qualified:
-                        return {"success": False, "error": f"Could not qualify contract for leg {i+1}: {leg['symbol']} {expiry} {leg['strike']}{right}"}
+                    action = leg["action"].upper()
+                    quantity = int(leg["quantity"])
                     
-                    qual_contract = qualified[0]
-                    print(f"DEBUG: Leg {i+1} qualified - ConId: {qual_contract.conId}")
+                    if order_type.upper() == "MARKET":
+                        order = MarketOrder(action, quantity)
+                    else:
+                        if limit_price is None:
+                            return {"success": False, "error": f"Limit price required for LIMIT orders (leg {i+1})"}
+                        # For multi-leg, divide limit price proportionally or use per-leg pricing
+                        order = LimitOrder(action, quantity, limit_price)
                     
-                    from ib_insync import ComboLeg
-                    combo_leg = ComboLeg(
-                        conId=qual_contract.conId,
-                        ratio=int(leg["quantity"]),
-                        action=leg["action"].upper(),
-                        exchange='SMART'
-                    )
-                    combo_legs.append(combo_leg)
-                
-                # Create Bag contract for the combo
-                from ib_insync import Contract
-                bag = Contract()
-                bag.symbol = legs[0]["symbol"].upper()
-                bag.secType = 'BAG'
-                bag.currency = 'USD'
-                bag.exchange = 'SMART'
-                bag.comboLegs = combo_legs
-                
-                # Create order - for combos, quantity is typically 1 (the combo itself)
-                if order_type.upper() == "MARKET":
-                    order = MarketOrder("BUY", 1)  # BUY the combo
-                else:
-                    if limit_price is None:
-                        return {"success": False, "error": "Limit price required for LIMIT orders"}
-                    # Positive limit = debit, negative = credit
-                    order = LimitOrder("BUY", 1, limit_price)
-                
-                print(f"DEBUG: Placing combo order - OrderType: {order_type}")
-                
-                # Place the order
-                trade = self.ib.placeOrder(bag, order)
-                
-                order_id = trade.order.orderId
-                status = trade.orderStatus.status if trade.orderStatus else "Submitted"
-                
-                leg_desc = ", ".join([f"{l['action']} {l['quantity']} {l['symbol']} {l['strike']}{l['right']}" for l in legs])
-                print(f"DEBUG: Combo order placed - ID: {order_id}, Status: {status}, Legs: {leg_desc}")
+                    trade = self.ib.placeOrder(contract, order)
+                    
+                    order_id = trade.order.orderId
+                    status = trade.orderStatus.status if trade.orderStatus else "Submitted"
+                    
+                    print(f"DEBUG: Leg {i+1} order placed - ID: {order_id}, Status: {status}")
+                    
+                    order_ids.append(order_id)
+                    messages.append(f"{action} {quantity} {leg['symbol']} {expiry} {leg['strike']}{right}")
                 
                 return {
                     "success": True,
-                    "order_id": order_id,
-                    "status": status,
-                    "message": f"Combo order: {leg_desc} @ {order_type}"
+                    "order_id": order_ids[0] if len(order_ids) == 1 else order_ids,
+                    "order_ids": order_ids,
+                    "status": "Submitted",
+                    "message": f"Placed {len(order_ids)} orders: " + ", ".join(messages)
                 }
-
                 
         except Exception as e:
             print(f"Error placing options order: {e}")
