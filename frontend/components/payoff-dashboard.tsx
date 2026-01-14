@@ -71,6 +71,17 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&nbsp;/g, ' ');
 }
 
+// Strip HTML tags from article content for clean LLM prompts
+function stripHtmlTags(text: string | undefined): string | undefined {
+  if (!text) return text;
+  // Remove HTML tags and decode entities
+  return decodeHtmlEntities(
+    text.replace(/<[^>]*>/g, ' ')  // Replace tags with space
+        .replace(/\s+/g, ' ')       // Collapse multiple spaces
+        .trim()
+  );
+}
+
 // Convert strike number to string key that matches backend JSON serialization
 // Python's str(50.0) = "50.0", str(50.5) = "50.5"
 // JavaScript's String(50.0) = "50", String(50.5) = "50.5"
@@ -702,10 +713,10 @@ export function PayoffDashboard() {
       setMarketNewsAnalysisLoading(true);
       
       try {
-        // Prepare articles with full content for deeper analysis
+        // Prepare articles with full content for deeper analysis (strip HTML tags)
         const articles = currentHeadlines.map(h => ({
           headline: h.headline,
-          body: h.body
+          body: stripHtmlTags(h.body)
         }));
         // Get tickers at analysis time (not from dependency)
         const tickers = [...new Set(positions.map(p => p.ticker))];
@@ -766,10 +777,10 @@ export function PayoffDashboard() {
       setTickerNewsAnalysisLoading(true);
       
       try {
-        // Prepare articles with full content for deeper analysis
+        // Prepare articles with full content for deeper analysis (strip HTML tags)
         const articles = currentHeadlines.map(h => ({
           headline: h.headline,
-          body: h.body
+          body: stripHtmlTags(h.body)
         }));
         
         // Store the prompt for "View Prompt" feature (show full articles)
