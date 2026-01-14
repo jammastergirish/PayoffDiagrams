@@ -501,7 +501,7 @@ class IBClient:
         Returns:
             dict with success status, order_id(s), and message/error
         """
-        if not self.connected:
+        if not self.connected or not self.ib.isConnected():
             return {"success": False, "error": "Not connected to IBKR"}
         
         if not legs or len(legs) == 0:
@@ -512,13 +512,29 @@ class IBClient:
                 # Single leg order
                 leg = legs[0]
                 
+                # Normalize right to single character (C or P)
+                right = leg["right"].upper()
+                if right == "CALL":
+                    right = "C"
+                elif right == "PUT":
+                    right = "P"
+                
                 # Create option contract
                 # Expiry format for ib_insync: YYYYMMDD
+                expiry_raw = leg["expiry"]
+                # Ensure expiry is in YYYYMMDD format (remove dashes if present)
+                expiry = expiry_raw.replace("-", "") if "-" in expiry_raw else expiry_raw
+                
+                print(f"DEBUG: Creating option contract - Symbol: {leg['symbol'].upper()}, Expiry: {expiry}, Strike: {leg['strike']}, Right: {right}")
+                
+                # IMPORTANT: Do NOT use qualifyContracts() here - it blocks waiting for IB event loop
+                # For fully specified options (symbol, expiry, strike, right, exchange, currency),
+                # IBKR can resolve the contract directly when placing the order
                 contract = Option(
                     symbol=leg["symbol"].upper(),
-                    lastTradeDateOrContractMonth=leg["expiry"],
+                    lastTradeDateOrContractMonth=expiry,
                     strike=float(leg["strike"]),
-                    right=leg["right"].upper(),
+                    right=right,
                     exchange='SMART',
                     currency='USD'
                 )
@@ -527,14 +543,16 @@ class IBClient:
                 action = leg["action"].upper()
                 quantity = int(leg["quantity"])
                 
-                if order_type == "MARKET":
+                if order_type.upper() == "MARKET":
                     order = MarketOrder(action, quantity)
                 else:
                     if limit_price is None:
                         return {"success": False, "error": "Limit price required for LIMIT orders"}
                     order = LimitOrder(action, quantity, limit_price)
                 
-                # Place the order
+                print(f"DEBUG: Placing order - Action: {action}, Quantity: {quantity}, OrderType: {order_type}")
+                
+                # Place the order - this is non-blocking, returns Trade object immediately
                 trade = self.ib.placeOrder(contract, order)
                 
                 order_id = trade.order.orderId
@@ -546,20 +564,43 @@ class IBClient:
                     "success": True,
                     "order_id": order_id,
                     "status": status,
-                    "message": f"{action} {quantity} {leg['symbol']} {leg['expiry']} {leg['strike']}{leg['right']} @ {order_type}"
+                    "message": f"{action} {quantity} {leg['symbol']} {expiry} {leg['strike']}{right} @ {order_type}"
                 }
             
             else:
-                # Multi-leg combo order
+                # Multi-leg combo orders require conIds which need qualifyContracts()
+                # qualifyContracts() blocks waiting for IB event loop response and hangs
+                # TODO: Implement async version or run in event loop thread
+                return {
+                    "success": False, 
+                    "error": "Multi-leg combo orders are not yet supported. Please place single-leg orders separately."
+                }
+                
+                # Original multi-leg combo code below - kept for reference
                 # First, qualify each leg contract to get conId
                 combo_legs = []
                 
+                print(f"DEBUG: Creating combo order with {len(legs)} legs")
+                
                 for i, leg in enumerate(legs):
+                    # Normalize right to single character (C or P)
+                    right = leg["right"].upper()
+                    if right == "CALL":
+                        right = "C"
+                    elif right == "PUT":
+                        right = "P"
+                    
+                    # Ensure expiry is in YYYYMMDD format
+                    expiry_raw = leg["expiry"]
+                    expiry = expiry_raw.replace("-", "") if "-" in expiry_raw else expiry_raw
+                    
+                    print(f"DEBUG: Leg {i+1} - Symbol: {leg['symbol'].upper()}, Expiry: {expiry}, Strike: {leg['strike']}, Right: {right}, Action: {leg['action']}")
+                    
                     contract = Option(
                         symbol=leg["symbol"].upper(),
-                        lastTradeDateOrContractMonth=leg["expiry"],
+                        lastTradeDateOrContractMonth=expiry,
                         strike=float(leg["strike"]),
-                        right=leg["right"].upper(),
+                        right=right,
                         exchange='SMART',
                         currency='USD'
                     )
@@ -567,9 +608,10 @@ class IBClient:
                     # Qualify to get conId
                     qualified = self.ib.qualifyContracts(contract)
                     if not qualified:
-                        return {"success": False, "error": f"Could not qualify contract for leg {i+1}"}
+                        return {"success": False, "error": f"Could not qualify contract for leg {i+1}: {leg['symbol']} {expiry} {leg['strike']}{right}"}
                     
                     qual_contract = qualified[0]
+                    print(f"DEBUG: Leg {i+1} qualified - ConId: {qual_contract.conId}")
                     
                     from ib_insync import ComboLeg
                     combo_leg = ComboLeg(
@@ -590,13 +632,15 @@ class IBClient:
                 bag.comboLegs = combo_legs
                 
                 # Create order - for combos, quantity is typically 1 (the combo itself)
-                if order_type == "MARKET":
+                if order_type.upper() == "MARKET":
                     order = MarketOrder("BUY", 1)  # BUY the combo
                 else:
                     if limit_price is None:
                         return {"success": False, "error": "Limit price required for LIMIT orders"}
                     # Positive limit = debit, negative = credit
                     order = LimitOrder("BUY", 1, limit_price)
+                
+                print(f"DEBUG: Placing combo order - OrderType: {order_type}")
                 
                 # Place the order
                 trade = self.ib.placeOrder(bag, order)
@@ -613,6 +657,7 @@ class IBClient:
                     "status": status,
                     "message": f"Combo order: {leg_desc} @ {order_type}"
                 }
+
                 
         except Exception as e:
             print(f"Error placing options order: {e}")
