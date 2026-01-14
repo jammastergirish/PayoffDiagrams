@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, fetchMarketNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote, placeOptionsOrder, OptionLeg } from "@/lib/api-client";
+import { checkBackendHealth, fetchLivePortfolio, fetchHistoricalData, HistoricalBar, fetchNewsHeadlines, fetchMarketNewsHeadlines, NewsHeadline, fetchTickerDetails, TickerDetails, fetchWatchlist, addToWatchlist, removeFromWatchlist, fetchDailySnapshot, DailySnapshot, placeTrade, TradeOrder, TradeResult, fetchOptionsChain, OptionsChain, OptionQuote, placeOptionsOrder, OptionLeg, fetchMarketNewsAnalysis, fetchTickerNewsAnalysis, LLMAnalysisResponse } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { NewsModal } from "@/components/news-modal";
 import { NewsItemList } from "@/components/news-item-list";
@@ -219,6 +219,15 @@ export function PayoffDashboard() {
   // Market News State (separate from per-ticker news)
   const [marketNewsHeadlines, setMarketNewsHeadlines] = useState<NewsHeadline[]>([]);
   const [marketNewsLoading, setMarketNewsLoading] = useState(false);
+  
+  // AI News Analysis State
+  const [marketNewsAnalysis, setMarketNewsAnalysis] = useState<string>("");
+  const [marketNewsAnalysisLoading, setMarketNewsAnalysisLoading] = useState(false);
+  const [marketNewsPrompt, setMarketNewsPrompt] = useState<string>("");
+  const [tickerNewsAnalysis, setTickerNewsAnalysis] = useState<string>("");
+  const [tickerNewsAnalysisLoading, setTickerNewsAnalysisLoading] = useState(false);
+  const [tickerNewsPrompt, setTickerNewsPrompt] = useState<string>("");
+  const [viewingPrompt, setViewingPrompt] = useState<string | null>(null); // Modal content
   
   // Portfolio Summary sort state
   type SortColumn = "ticker" | "underlyingPrice" | "unrealizedPnl" | "unrealizedPnlPct" | "dailyPnl" | "dailyPnlPct" | "marketValue" | "maxLoss" | "maxProfit";
@@ -665,6 +674,103 @@ export function PayoffDashboard() {
     
     return () => clearInterval(interval);
   }, [portfolioView, isLiveMode, ibConnected, marketNewsHeadlines.length]);
+
+  // Auto-analyze market news when headlines change
+  const lastMarketAnalysisRef = useRef<string>("");
+  const marketAnalysisInProgressRef = useRef(false);
+  useEffect(() => {
+    if (marketNewsHeadlines.length === 0) return;
+    if (marketAnalysisInProgressRef.current) return; // Prevent concurrent analyses
+    
+    // Create a fingerprint of current headlines to detect changes
+    const headlinesFingerprint = marketNewsHeadlines.slice(0, 10).map(h => h.articleId).join(",");
+    if (headlinesFingerprint === lastMarketAnalysisRef.current) return;
+    lastMarketAnalysisRef.current = headlinesFingerprint;
+    
+    // Start analysis with progress bar
+    const analyze = async () => {
+      marketAnalysisInProgressRef.current = true;
+      registerLoadTasks(["analysis:market"]);
+      startLoadTask("analysis:market");
+      setMarketNewsAnalysisLoading(true);
+      
+      try {
+        const headlines = marketNewsHeadlines.slice(0, 10).map(h => h.headline);
+        // Get tickers at analysis time (not from dependency)
+        const tickers = [...new Set(positions.map(p => p.ticker))];
+        
+        // Store the prompt for "View Prompt" feature
+        const headlinesStr = headlines.map(h => `- ${h}`).join("\n");
+        const tickersStr = tickers.join(", ") || "general market";
+        const prompt = `What do these top headlines today mean for my investments (${tickersStr})? Give a summary in 100 words.\n\nHeadlines:\n${headlinesStr}`;
+        setMarketNewsPrompt(prompt);
+        
+        const result = await fetchMarketNewsAnalysis(headlines, tickers);
+        if (result.summary) {
+          setMarketNewsAnalysis(result.summary);
+        } else if (result.error) {
+          setMarketNewsAnalysis("");
+        }
+      } catch (err) {
+        console.error("Error analyzing market news:", err);
+      } finally {
+        setMarketNewsAnalysisLoading(false);
+        completeLoadTask("analysis:market");
+        marketAnalysisInProgressRef.current = false;
+      }
+    };
+    
+    analyze();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marketNewsHeadlines]);
+
+  // Auto-analyze ticker news when headlines change
+  const lastTickerAnalysisRef = useRef<string>("");
+  const tickerAnalysisInProgressRef = useRef(false);
+  useEffect(() => {
+    if (!selectedTicker || newsHeadlines.length === 0) return;
+    if (tickerAnalysisInProgressRef.current) return; // Prevent concurrent analyses
+    
+    // Create a fingerprint of current ticker + headlines to detect changes
+    const fingerprint = `${selectedTicker}:${newsHeadlines.slice(0, 10).map(h => h.articleId).join(",")}`;
+    if (fingerprint === lastTickerAnalysisRef.current) return;
+    lastTickerAnalysisRef.current = fingerprint;
+    
+    // Clear previous analysis when switching tickers
+    setTickerNewsAnalysis("");
+    
+    // Start analysis with progress bar
+    const analyze = async () => {
+      tickerAnalysisInProgressRef.current = true;
+      registerLoadTasks(["analysis:ticker"]);
+      startLoadTask("analysis:ticker");
+      setTickerNewsAnalysisLoading(true);
+      
+      try {
+        const headlines = newsHeadlines.slice(0, 10).map(h => h.headline);
+        
+        // Store the prompt for "View Prompt" feature
+        const headlinesStr = headlines.map(h => `- ${h}`).join("\n");
+        const prompt = `What do these recent news headlines mean for ${selectedTicker.toUpperCase()} stock? Give a summary in 100 words focusing on potential price impact.\n\nHeadlines:\n${headlinesStr}`;
+        setTickerNewsPrompt(prompt);
+        
+        const result = await fetchTickerNewsAnalysis(headlines, selectedTicker);
+        if (result.summary) {
+          setTickerNewsAnalysis(result.summary);
+        } else if (result.error) {
+          setTickerNewsAnalysis("");
+        }
+      } catch (err) {
+        console.error("Error analyzing ticker news:", err);
+      } finally {
+        setTickerNewsAnalysisLoading(false);
+        completeLoadTask("analysis:ticker");
+        tickerAnalysisInProgressRef.current = false;
+      }
+    };
+    
+    analyze();
+  }, [selectedTicker, newsHeadlines]);
 
   // Fetch ticker details (company name, logo) when ticker changes
   useEffect(() => {
@@ -1360,6 +1466,33 @@ export function PayoffDashboard() {
               <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Market News</CardTitle>
             </CardHeader>
             <CardContent className="pt-2">
+              {/* AI Analysis - Auto-loaded */}
+              {(marketNewsAnalysisLoading || marketNewsAnalysis) && (
+                <div className="mb-4 p-4 bg-gradient-to-r from-blue-900/30 to-purple-900/30 rounded-lg border border-blue-500/20">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-blue-400 text-lg">✨</span>
+                      <span className="text-sm font-medium text-blue-300">Analysis</span>
+                    </div>
+                    {marketNewsPrompt && !marketNewsAnalysisLoading && (
+                      <button
+                        onClick={() => setViewingPrompt(marketNewsPrompt)}
+                        className="text-xs text-blue-400/70 hover:text-blue-300 underline"
+                      >
+                        View prompt
+                      </button>
+                    )}
+                  </div>
+                  {marketNewsAnalysisLoading ? (
+                    <p className="text-sm text-gray-400 italic flex items-center gap-2">
+                      <span className="animate-spin">⏳</span> Analyzing headlines for your portfolio...
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-300 leading-relaxed">{marketNewsAnalysis}</p>
+                  )}
+                </div>
+              )}
+              
               <NewsItemList
                 headlines={marketNewsHeadlines}
                 loading={marketNewsLoading}
@@ -1897,6 +2030,33 @@ export function PayoffDashboard() {
                       <CardTitle className="text-gray-400 font-normal uppercase tracking-wider text-xs">Latest News for {selectedTicker}</CardTitle>
                     </CardHeader>
                     <CardContent className="pt-2">
+                      {/* AI Analysis - Auto-loaded */}
+                      {selectedTicker && (tickerNewsAnalysisLoading || tickerNewsAnalysis) && (
+                        <div className="mb-4 p-4 bg-gradient-to-r from-orange-900/30 to-amber-900/30 rounded-lg border border-orange-500/20">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-orange-400 text-lg">✨</span>
+                              <span className="text-sm font-medium text-orange-300">Analysis</span>
+                            </div>
+                            {tickerNewsPrompt && !tickerNewsAnalysisLoading && (
+                              <button
+                                onClick={() => setViewingPrompt(tickerNewsPrompt)}
+                                className="text-xs text-orange-400/70 hover:text-orange-300 underline"
+                              >
+                                View prompt
+                              </button>
+                            )}
+                          </div>
+                          {tickerNewsAnalysisLoading ? (
+                            <p className="text-sm text-gray-400 italic flex items-center gap-2">
+                              <span className="animate-spin">⏳</span> Analyzing headlines for {selectedTicker}...
+                            </p>
+                          ) : (
+                            <p className="text-sm text-gray-300 leading-relaxed">{tickerNewsAnalysis}</p>
+                          )}
+                        </div>
+                      )}
+                      
                       <NewsItemList
                         headlines={newsHeadlines}
                         loading={newsLoading}
@@ -2801,6 +2961,36 @@ export function PayoffDashboard() {
           articleUrl={selectedArticle.url}
           articleImageUrl={selectedArticle.imageUrl}
         />
+      )}
+
+      {/* Prompt Viewing Modal */}
+      {viewingPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-white/10 rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-white/10">
+              <h3 className="text-lg font-medium text-white">Prompt Sent to AI</h3>
+              <button
+                onClick={() => setViewingPrompt(null)}
+                className="text-gray-400 hover:text-white text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[60vh]">
+              <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono bg-slate-950 p-4 rounded-lg">
+                {viewingPrompt}
+              </pre>
+            </div>
+            <div className="p-4 border-t border-white/10 flex justify-end">
+              <button
+                onClick={() => setViewingPrompt(null)}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

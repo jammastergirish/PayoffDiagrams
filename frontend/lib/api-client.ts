@@ -389,3 +389,67 @@ export async function placeOptionsOrder(order: OptionsTradeOrder): Promise<Trade
         return { success: false, error: e instanceof Error ? e.message : "Failed to place options order" };
     }
 }
+
+// ==================
+// LLM Analysis
+// ==================
+
+export interface LLMAnalysisResponse {
+    summary?: string;
+    error?: string;
+}
+
+export async function fetchMarketNewsAnalysis(
+    headlines: string[],
+    tickers: string[]
+): Promise<LLMAnalysisResponse> {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for LLM
+        
+        const res = await fetch(`${API_BASE}/api/llm/analyze-market-news`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ headlines, tickers }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) throw new Error("Failed to analyze market news");
+        return await res.json();
+    } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+            return { error: "Analysis request timed out" };
+        }
+        console.error(e);
+        return { error: e instanceof Error ? e.message : "Failed to analyze news" };
+    }
+}
+
+export async function fetchTickerNewsAnalysis(
+    headlines: string[],
+    ticker: string
+): Promise<LLMAnalysisResponse> {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for LLM
+        
+        const res = await fetch(`${API_BASE}/api/llm/analyze-ticker-news`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ headlines, ticker }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) throw new Error("Failed to analyze ticker news");
+        return await res.json();
+    } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+            return { error: "Analysis request timed out" };
+        }
+        console.error(e);
+        return { error: e instanceof Error ? e.message : "Failed to analyze news" };
+    }
+}
+

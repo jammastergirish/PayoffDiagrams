@@ -96,12 +96,26 @@ export function NewsItemList({
     );
   }
 
+  // Deduplicate headlines by articleId or headline text
+  const seenIds = new Set<string>();
+  const seenHeadlines = new Set<string>();
+  const uniqueHeadlines = headlines.filter(h => {
+    const id = h.articleId;
+    const text = h.headline.toLowerCase().trim();
+    if (seenIds.has(id) || seenHeadlines.has(text)) {
+      return false;
+    }
+    seenIds.add(id);
+    seenHeadlines.add(text);
+    return true;
+  });
+
   // Split headlines: featured (first with image), rest in grid
-  const featuredArticle = headlines.find(h => h.imageUrl);
+  const featuredArticle = uniqueHeadlines.find(h => h.imageUrl);
   const remainingArticles = featuredArticle 
-    ? headlines.filter(h => h !== featuredArticle)
-    : headlines.slice(1);
-  const firstNoImage = !featuredArticle ? headlines[0] : null;
+    ? uniqueHeadlines.filter(h => h !== featuredArticle)
+    : uniqueHeadlines.slice(1);
+  const firstNoImage = !featuredArticle ? uniqueHeadlines[0] : null;
 
   return (
     <div className="space-y-4">

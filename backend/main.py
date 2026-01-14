@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .ib_client import ib_client, PositionModel
 from .massive_client import get_historical_bars, get_news, get_market_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot, get_options_chain as massive_get_options_chain
+from .llm_client import analyze_market_news, analyze_ticker_news
 import asyncio
 import json
 from pathlib import Path
@@ -447,3 +448,38 @@ def remove_from_watchlist(ticker: str):
         _write_watchlist(tickers)
     
     return {"tickers": tickers}
+
+
+# ==================
+# LLM Analysis Routes
+# ==================
+
+class MarketNewsAnalysisRequest(BaseModel):
+    headlines: list[str]
+    tickers: list[str]
+
+class TickerNewsAnalysisRequest(BaseModel):
+    headlines: list[str]
+    ticker: str
+
+
+@app.post("/api/llm/analyze-market-news")
+def llm_analyze_market_news(request: MarketNewsAnalysisRequest):
+    """
+    Analyze market news headlines for portfolio impact using LLM.
+    
+    Returns AI-generated summary of how headlines affect the portfolio.
+    """
+    result = analyze_market_news(request.headlines, request.tickers)
+    return result
+
+
+@app.post("/api/llm/analyze-ticker-news")
+def llm_analyze_ticker_news(request: TickerNewsAnalysisRequest):
+    """
+    Analyze news headlines for a specific ticker using LLM.
+    
+    Returns AI-generated summary of how headlines affect the stock.
+    """
+    result = analyze_ticker_news(request.headlines, request.ticker)
+    return result
