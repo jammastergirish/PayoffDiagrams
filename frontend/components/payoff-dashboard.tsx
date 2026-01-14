@@ -2968,7 +2968,7 @@ export function PayoffDashboard() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-white/10 rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-white/10">
-              <h3 className="text-lg font-medium text-white">Prompt Sent to AI</h3>
+              <h3 className="text-lg font-medium text-white">Prompt Sent to OpenAI's GPT4o</h3>
               <button
                 onClick={() => setViewingPrompt(null)}
                 className="text-gray-400 hover:text-white text-2xl leading-none"
