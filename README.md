@@ -1,43 +1,40 @@
 # TradeShape
 
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+
 <img width="796" height="454" alt="Screenshot 2026-01-05 at 10 12 03" src="https://github.com/user-attachments/assets/bea2750f-0be4-4d8a-bb6e-d1a5c433e8d5" />
 
-A personalized trading dashboard that connects directly to Interactive Brokers (IBKR) TWS for real-time portfolio analysis, payoff diagrams, AI-powered news analysis, and more.
+A personalized trading dashboard that connects directly to Interactive Brokers (IBKR) TWS for real-time portfolio analysis, payoff diagrams, and market news. **Fully responsive** for desktop and mobile.
 
 ## Features
 
-### 📊 Portfolio Dashboard
+### Portfolio Dashboard
 - **Live Connection**: Real-time sync with IBKR TWS positions and P&L
 - **Multi-Account Support**: View positions across all accounts or filter by account
-- **Key Metrics**: Net Liquidation, YTD %, Daily P&L, Realized P&L, Unrealized P&L, Buying Power
-- **Privacy Mode**: Hide dollar amounts with a single click (shows only percentages)
+- **Key Metrics**: Net Liquidation, Daily P&L, Realized P&L, Unrealized P&L
 
-### 📈 Payoff & Risk Analysis  
+### Payoff & Risk Analysis  
 - **Interactive Charts**: P&L at different price points for stocks and options
 - **Greeks Dashboard**: Delta, Gamma, Theta, Vega exposure per ticker
 - **IV & Date Simulation**: Stress-test positions with volatility and time changes
 - **Breakevens**: Automatically calculated with max profit/loss
 
-### 📰 Market News
-- **Market News Tab**: Latest headlines affecting your portfolio tickers
-- **Ticker-Specific News**: News filtered per stock when viewing detail view
-- **Article Popups**: Click headlines to read full articles
-- **AI Analysis**: GPT-powered summaries of news impact on your positions
-- **View Prompt**: See exactly what's being sent to the AI for transparency
+### Market Data
+- **Price Charts**: Historical price data with 1H, 1D, 1W, 1M, 1Y timeframes
+- **News Tab**: Latest headlines per ticker with full article popups
 
-### 📱 Mobile Responsive
-- Works on phones via your local network
-- Hamburger menu with slide-out sidebar
-- Touch-friendly interface
+### Demo Mode
+Run the app without an IBKR connection using sample data—perfect for development or quick demos.
 
 <img width="798" height="451" alt="Screenshot 2026-01-05 at 10 11 48" src="https://github.com/user-attachments/assets/31c43623-beaf-4dd1-bfb6-555d4476699f" />
 
 ## Architecture
 
-- **Frontend**: Next.js + React + TypeScript (in `frontend/`)
+- **Frontend**: Next.js + React (in `frontend/`)
 - **Backend**: Python FastAPI + ib_insync (in `backend/`)
-- **News Data**: Massive.com API (Benzinga, Investing.com articles)
-- **AI Analysis**: OpenAI GPT-4o-mini
 
 ## Quick Start
 
@@ -114,3 +111,11 @@ npm test
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui, Recharts
 - **Backend**: FastAPI, ib_insync, OpenAI, Python 3.13
 - **Data Sources**: Interactive Brokers (positions/trades), Massive.com (news), Polygon.io (ticker logos)
+
+## Contributing
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
