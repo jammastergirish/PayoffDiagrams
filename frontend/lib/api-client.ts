@@ -121,6 +121,7 @@ export interface NewsHeadline {
     url?: string;      // Link to original article
     author?: string;
     channels?: string[];
+    imageUrl?: string; // Article thumbnail image
 }
 
 export interface NewsArticle {

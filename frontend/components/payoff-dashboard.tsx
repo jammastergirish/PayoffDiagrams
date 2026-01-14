@@ -187,7 +187,7 @@ export function PayoffDashboard() {
   // News State
   const [newsHeadlines, setNewsHeadlines] = useState<NewsHeadline[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
-  const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string; body?: string; url?: string } | null>(null);
+  const [selectedArticle, setSelectedArticle] = useState<{ articleId: string; providerCode: string; headline: string; body?: string; url?: string; imageUrl?: string } | null>(null);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
 
   // Ticker Details State (company name, logo)
@@ -620,13 +620,16 @@ export function PayoffDashboard() {
     };
   }, [selectedTicker, isLiveMode, ibConnected, startLoadTask, completeLoadTask]);
 
-  // Fetch market news when Market News tab is selected
+  // Fetch market news when Market News tab is selected - uses preloaded cache if available
   useEffect(() => {
     if (!isLiveMode || !ibConnected) return;
     if (portfolioView !== "news") return;
     
-    const fetchMarketNews = () => {
-      setMarketNewsLoading(true);
+    // If we have cached data (from bootstrap preload), don't show spinner
+    const hasCached = marketNewsHeadlines.length > 0;
+    
+    const fetchMarketNews = (showSpinner: boolean) => {
+      if (showSpinner) setMarketNewsLoading(true);
       fetchMarketNewsHeadlines(25)
         .then(data => {
           if (isMountedRef.current) {
@@ -643,14 +646,16 @@ export function PayoffDashboard() {
         });
     };
     
-    // Initial fetch
-    fetchMarketNews();
+    // Only show spinner if no cached data yet
+    if (!hasCached) {
+      fetchMarketNews(true);
+    }
     
-    // Poll every 30 seconds
-    const interval = setInterval(fetchMarketNews, 30000);
+    // Poll every 30 seconds (no spinner on refresh)
+    const interval = setInterval(() => fetchMarketNews(false), 30000);
     
     return () => clearInterval(interval);
-  }, [portfolioView, isLiveMode, ibConnected]);
+  }, [portfolioView, isLiveMode, ibConnected, marketNewsHeadlines.length]);
 
   // Fetch ticker details (company name, logo) when ticker changes
   useEffect(() => {
@@ -794,6 +799,22 @@ export function PayoffDashboard() {
               if (isMounted) completeLoadTask(taskKey);
             }
           });
+
+          // Preload market news in background
+          registerLoadTasks(["news:market"]);
+          startLoadTask("news:market");
+          fetchMarketNewsHeadlines(25)
+            .then(data => {
+              if (isMounted) {
+                setMarketNewsHeadlines(data.headlines || []);
+              }
+            })
+            .catch(err => {
+              console.error("Error preloading market news:", err);
+            })
+            .finally(() => {
+              if (isMounted) completeLoadTask("news:market");
+            });
 
           // Preload ticker details (company logos) for all tickers
           void runWithConcurrency(tickerList, 5, async ticker => {
@@ -2744,6 +2765,7 @@ export function PayoffDashboard() {
           headline={selectedArticle.headline}
           articleBody={selectedArticle.body}
           articleUrl={selectedArticle.url}
+          articleImageUrl={selectedArticle.imageUrl}
         />
       )}
 

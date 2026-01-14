@@ -43,6 +43,7 @@ interface NewsItemListProps {
     headline: string;
     body?: string;
     url?: string;
+    imageUrl?: string;
   }) => void;
 }
 
@@ -99,12 +100,27 @@ export function NewsItemList({
               headline: decodeHtmlEntities(news.headline),
               body: news.body || news.teaser,
               url: news.url,
+              imageUrl: news.imageUrl,
             });
           }}
         >
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <h3 className={`text-sm font-medium text-white ${colors.hoverText} transition-colors leading-snug`}>
+          <div className="flex items-start gap-4">
+            {/* Thumbnail */}
+            {news.imageUrl && (
+              <div className="flex-shrink-0 w-20 h-14 rounded overflow-hidden bg-slate-800">
+                <img
+                  src={news.imageUrl}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+            
+            <div className="flex-1 min-w-0">
+              <h3 className={`text-sm font-medium text-white ${colors.hoverText} transition-colors leading-snug line-clamp-2`}>
                 {decodeHtmlEntities(news.headline)}
               </h3>
               <div className="flex items-center gap-3 mt-2">
@@ -116,7 +132,8 @@ export function NewsItemList({
                 </span>
               </div>
             </div>
-            <span className={`text-gray-600 ${colors.arrow} transition-colors text-lg`}>→</span>
+            
+            <span className={`text-gray-600 ${colors.arrow} transition-colors text-lg flex-shrink-0`}>→</span>
           </div>
         </div>
       ))}

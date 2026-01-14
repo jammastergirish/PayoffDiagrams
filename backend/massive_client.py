@@ -282,6 +282,10 @@ def get_news(symbol: str, limit: int = 15) -> dict:
                 break
             count += 1
             
+            # Get first image if available (Benzinga returns list of images)
+            images = getattr(article, 'images', [])
+            image_url = images[0] if images else None
+            
             all_headlines.append({
                 "articleId": str(getattr(article, 'benzinga_id', '')),
                 "headline": getattr(article, 'title', ''),
@@ -292,6 +296,7 @@ def get_news(symbol: str, limit: int = 15) -> dict:
                 "body": getattr(article, 'body', getattr(article, 'teaser', '')),
                 "url": getattr(article, 'url', ''),
                 "author": getattr(article, 'author', ''),
+                "imageUrl": image_url,
             })
         
         print(f"DEBUG [Massive]: Retrieved {count} Benzinga headlines for {symbol}")
@@ -331,6 +336,7 @@ def get_news(symbol: str, limit: int = 15) -> dict:
                 "body": getattr(article, 'description', ''),  # Reference news has description, not full body
                 "url": getattr(article, 'article_url', ''),
                 "author": getattr(article, 'author', ''),
+                "imageUrl": getattr(article, 'image_url', None),
             })
         
         print(f"DEBUG [Massive]: Retrieved {count} reference news headlines for {symbol}")
@@ -412,6 +418,10 @@ def get_market_news(limit: int = 25) -> dict:
                     continue
                 seen_headlines.add(headline)
                 
+                # Get first image if available (Benzinga returns list of images)
+                images = getattr(article, 'images', [])
+                image_url = images[0] if images else None
+                
                 all_headlines.append({
                     "articleId": str(getattr(article, 'benzinga_id', '')),
                     "headline": headline,
@@ -422,6 +432,7 @@ def get_market_news(limit: int = 25) -> dict:
                     "body": getattr(article, 'body', getattr(article, 'teaser', '')),
                     "url": getattr(article, 'url', ''),
                     "author": getattr(article, 'author', ''),
+                    "imageUrl": image_url,
                 })
             
         except Exception as e:
@@ -461,6 +472,7 @@ def get_market_news(limit: int = 25) -> dict:
                     "body": getattr(article, 'description', ''),
                     "url": getattr(article, 'article_url', ''),
                     "author": getattr(article, 'author', ''),
+                    "imageUrl": getattr(article, 'image_url', None),
                 })
             
         except Exception as e:

@@ -16,23 +16,41 @@ interface NewsModalProps {
   headline: string;
   articleBody?: string;  // Body is now included in headline response
   articleUrl?: string;   // Link to original article
+  articleImageUrl?: string;  // Article image
 }
 
-export function NewsModal({ isOpen, onClose, providerCode, articleId, headline, articleBody, articleUrl }: NewsModalProps) {
+export function NewsModal({ isOpen, onClose, providerCode, articleId, headline, articleBody, articleUrl, articleImageUrl }: NewsModalProps) {
   // No longer need to fetch - body is passed directly from headlines
 
   const renderContent = () => {
-    if (!articleBody) {
-      return <div className="text-gray-500 py-8 text-center">No content available</div>;
-    }
-
-    // The article text from Benzinga is typically HTML
     return (
       <div className="space-y-4">
-        <div 
-          className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed prose-p:mb-6 prose-li:mb-2 [&>p]:mb-6 [&_p]:mb-6"
-          dangerouslySetInnerHTML={{ __html: articleBody }}
-        />
+        {/* Article Image */}
+        {articleImageUrl && (
+          <div className="w-full rounded-lg overflow-hidden bg-slate-800">
+            <img
+              src={articleImageUrl}
+              alt=""
+              className="w-full h-auto max-h-64 object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+        
+        {/* Article Body */}
+        {articleBody ? (
+          <>
+            <div 
+              className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed prose-p:mb-6 prose-li:mb-2 [&>p]:mb-6 [&_p]:mb-6"
+              dangerouslySetInnerHTML={{ __html: articleBody }}
+            />
+          </>
+        ) : (
+          <div className="text-gray-500 py-4 text-center">No content available</div>
+        )}
+        
         {articleUrl && (
           <div className="pt-4 border-t border-white/10">
             <a 
@@ -41,7 +59,7 @@ export function NewsModal({ isOpen, onClose, providerCode, articleId, headline, 
               rel="noopener noreferrer"
               className="text-orange-400 hover:text-orange-300 text-sm"
             >
-              Read full article on Benzinga →
+              Read full article →
             </a>
           </div>
         )}
