@@ -1,59 +1,93 @@
 import { Position, AccountSummary } from "./payoff-utils";
 
 // Use current hostname for API calls - works on localhost and LAN
-const API_BASE = typeof window !== 'undefined' 
+const API_BASE = typeof window !== 'undefined'
     ? `http://${window.location.hostname}:8000`
     : "http://localhost:8000";
 
-export async function checkBackendHealth(): Promise<{ status: string; ib_connected: boolean } | null> {
+// Generic API request wrapper to eliminate duplicate try-catch patterns
+async function apiRequest<T>(
+    endpoint: string,
+    options?: RequestInit & { timeout?: number },
+    fallback?: T
+): Promise<T> {
     try {
-        const res = await fetch(`${API_BASE}/api/health`);
-        if (!res.ok) return null;
-        return await res.json();
-    } catch (e) {
-        return null;
+        let finalOptions = { ...options };
+
+        // Add timeout support if specified
+        if (options?.timeout) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), options.timeout);
+            finalOptions.signal = controller.signal;
+
+            try {
+                const res = await fetch(`${API_BASE}${endpoint}`, finalOptions);
+                clearTimeout(timeoutId);
+                if (!res.ok) {
+                    throw new Error(`API request failed: ${res.status} ${res.statusText}`);
+                }
+                return await res.json();
+            } catch (e) {
+                clearTimeout(timeoutId);
+                throw e;
+            }
+        } else {
+            const res = await fetch(`${API_BASE}${endpoint}`, finalOptions);
+            if (!res.ok) {
+                throw new Error(`API request failed: ${res.status} ${res.statusText}`);
+            }
+            return await res.json();
+        }
+    } catch (error: any) {
+        if (error.name === 'AbortError') {
+            console.warn(`Request to ${endpoint} timed out`);
+        } else {
+            console.error(`API Error [${endpoint}]:`, error);
+        }
+        if (fallback !== undefined) {
+            return fallback;
+        }
+        throw error;
     }
 }
 
-export async function fetchLivePortfolio(): Promise<{ 
-    accounts: string[], 
-    positions: Position[], 
-    summary: Record<string, AccountSummary> 
-}> {
-    try {
-        const res = await fetch(`${API_BASE}/api/portfolio`);
-        if (!res.ok) throw new Error("Failed to fetch portfolio");
-        const data = await res.json();
-        
-        if (Array.isArray(data)) {
-             return { accounts: [], positions: data, summary: {} };
-        } else if (data.positions) {
-             // Handle legacy summary (single object) vs new summary (map)
-             let summaryMap: Record<string, AccountSummary> = {};
-             
-             if (data.summary) {
-                 // Check if it's the new map keyed by ID or the old single object
-                 // Simple heuristic: check if values are objects
-                 const keys = Object.keys(data.summary);
-                 if (keys.length > 0 && typeof data.summary[keys[0]] === 'object') {
-                     summaryMap = data.summary;
-                 } else {
-                     // Legacy single summary, assign to "default" or try to infer
-                     summaryMap["default"] = data.summary;
-                 }
-             }
+export async function checkBackendHealth(): Promise<{ status: string; ib_connected: boolean } | null> {
+    return apiRequest('/api/health', undefined, null);
+}
 
-             return { 
-                 accounts: data.accounts || [], 
-                 positions: data.positions, 
-                 summary: summaryMap 
-             };
+export async function fetchLivePortfolio(): Promise<{
+    accounts: string[],
+    positions: Position[],
+    summary: Record<string, AccountSummary>
+}> {
+    const fallback = { accounts: [], positions: [], summary: {} };
+    const data = await apiRequest<any>('/api/portfolio', undefined, fallback);
+
+    if (Array.isArray(data)) {
+        return { accounts: [], positions: data, summary: {} };
+    } else if (data.positions) {
+        // Handle legacy summary (single object) vs new summary (map)
+        let summaryMap: Record<string, AccountSummary> = {};
+
+        if (data.summary) {
+            // Check if it's the new map keyed by ID or the old single object
+            // Simple heuristic: check if values are objects
+            const keys = Object.keys(data.summary);
+            if (keys.length > 0 && typeof data.summary[keys[0]] === 'object') {
+                summaryMap = data.summary;
+            } else {
+                // Legacy single summary, assign to "default" or try to infer
+                summaryMap["default"] = data.summary;
+            }
         }
-        return { accounts: [], positions: [], summary: {} };
-    } catch (e) {
-        console.error(e);
-        return { accounts: [], positions: [], summary: {} };
+
+        return {
+            accounts: data.accounts || [],
+            positions: data.positions,
+            summary: summaryMap
+        };
     }
+    return fallback;
 }
 
 export interface HistoricalBar {
@@ -66,17 +100,14 @@ export interface HistoricalBar {
 }
 
 export async function fetchHistoricalData(
-    symbol: string, 
+    symbol: string,
     timeframe: string = "1M"
 ): Promise<{ symbol: string; timeframe: string; bars: HistoricalBar[] }> {
-    try {
-        const res = await fetch(`${API_BASE}/api/historical/${symbol}?timeframe=${timeframe}`);
-        if (!res.ok) throw new Error("Failed to fetch historical data");
-        return await res.json();
-    } catch (e) {
-        console.error(e);
-        return { symbol, timeframe, bars: [] };
-    }
+    return apiRequest(
+        `/api/historical/${symbol}?timeframe=${timeframe}`,
+        undefined,
+        { symbol, timeframe, bars: [] }
+    );
 }
 
 // =====================
@@ -139,26 +170,11 @@ export async function fetchNewsHeadlines(
     symbol: string,
     limit: number = 10
 ): Promise<{ symbol: string; headlines: NewsHeadline[] }> {
-    try {
-        // Add timeout to prevent hanging - news API can be slow
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-        
-        const res = await fetch(`${API_BASE}/api/news/${symbol}?limit=${limit}`, {
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        
-        if (!res.ok) throw new Error("Failed to fetch news");
-        return await res.json();
-    } catch (e) {
-        if (e instanceof Error && e.name === 'AbortError') {
-            console.warn(`News request for ${symbol} timed out`);
-        } else {
-            console.error(e);
-        }
-        return { symbol, headlines: [] };
-    }
+    return apiRequest(
+        `/api/news/${symbol}?limit=${limit}`,
+        { timeout: 15000 }, // 15s timeout for slow news API
+        { symbol, headlines: [] }
+    );
 }
 
 export async function fetchMarketNewsHeadlines(
@@ -247,18 +263,15 @@ export interface TradeResult {
 }
 
 export async function placeTrade(order: TradeOrder): Promise<TradeResult> {
-    try {
-        const res = await fetch(`${API_BASE}/api/trade`, {
+    return apiRequest(
+        '/api/trade',
+        {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(order),
-        });
-        if (!res.ok) throw new Error("Failed to place trade");
-        return await res.json();
-    } catch (e) {
-        console.error(e);
-        return { success: false, error: e instanceof Error ? e.message : "Failed to place trade" };
-    }
+        },
+        { success: false, error: "Failed to place trade" }
+    );
 }
 
 
