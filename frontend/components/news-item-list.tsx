@@ -1,45 +1,8 @@
 "use client";
 
 import { NewsHeadline } from "@/lib/api-client";
-
-// Decode HTML entities like &#39; -> ' and &amp; -> &
-function decodeHtmlEntities(text: string): string {
-  if (typeof window === 'undefined') {
-    return text
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&#x27;/g, "'")
-      .replace(/&#x2F;/g, '/');
-  }
-  const textarea = document.createElement('textarea');
-  textarea.innerHTML = text;
-  return textarea.value;
-}
-
-// Format datetime as relative time (e.g., "2h ago", "15m ago")
-function formatRelativeTime(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(d.getTime())) return '';
-  
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-  
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  
-  // Fall back to date format
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${month}/${day}`;
-}
+import { decodeHtmlEntities } from "@/lib/text-utils";
+import { formatRelativeTime } from "@/lib/format-utils";
 
 interface NewsItemListProps {
   headlines: NewsHeadline[];

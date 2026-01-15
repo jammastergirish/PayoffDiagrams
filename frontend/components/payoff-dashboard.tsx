@@ -2,10 +2,10 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { 
-  Position, 
-  calculatePnl, 
-  getBreakevens, 
+import {
+  Position,
+  calculatePnl,
+  getBreakevens,
   calculateMaxRiskReward,
   getPriceRange,
   calculateTheoreticalPnl
@@ -36,6 +36,11 @@ import {
 } from "@/components/ui/select";
 import { AccountSummary } from "@/lib/payoff-utils";
 
+import { formatCurrency, formatCurrencyOrInfinity, formatPercent, formatPrivateCurrency } from "@/lib/format-utils";
+import { formatDate, formatDateTime } from "@/lib/date-utils";
+import { decodeHtmlEntities, stripHtmlTags } from "@/lib/text-utils";
+import { getStrikeQuote, formatExpiry, expiryWithoutDashes } from "@/lib/options-utils";
+
 async function runWithConcurrency<T>(
   items: T[],
   limit: number,
@@ -51,88 +56,6 @@ async function runWithConcurrency<T>(
     }
   });
   await Promise.all(workers);
-}
-
-// Decode HTML entities like &#39; -> ' and &amp; -> &
-function decodeHtmlEntities(text: string): string {
-  const textarea = typeof document !== 'undefined' ? document.createElement('textarea') : null;
-  if (textarea) {
-    textarea.innerHTML = text;
-    return textarea.value;
-  }
-  // Fallback for SSR - handle common entities
-  return text
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ');
-}
-
-// Strip HTML tags from article content for clean LLM prompts
-function stripHtmlTags(text: string | undefined): string | undefined {
-  if (!text) return text;
-  // Remove HTML tags and decode entities
-  return decodeHtmlEntities(
-    text.replace(/<[^>]*>/g, ' ')  // Replace tags with space
-        .replace(/\s+/g, ' ')       // Collapse multiple spaces
-        .trim()
-  );
-}
-
-// Convert strike number to string key that matches backend JSON serialization
-// Python's str(50.0) = "50.0", str(50.5) = "50.5"
-// JavaScript's String(50.0) = "50", String(50.5) = "50.5"
-// We need to try multiple formats to find the match
-function getStrikeQuote(
-  chainData: Record<string, Record<string, unknown>> | undefined,
-  expiry: string,
-  strike: number
-): unknown {
-  if (!chainData?.[expiry]) return undefined;
-  const data = chainData[expiry];
-  
-  // Try direct number key (won't work for integers due to JS string coercion)
-  if (data[strike] !== undefined) return data[strike];
-  
-  // Try JavaScript's String(strike) - works for 50.5 -> "50.5", but 50.0 -> "50"
-  const jsKey = String(strike);
-  if (data[jsKey] !== undefined) return data[jsKey];
-  
-  // Try Python's str() format: 50.0 -> "50.0" (keeps one decimal place for integers)
-  // This is the key format the backend now uses
-  const pyKey = Number.isInteger(strike) ? `${strike}.0` : String(strike);
-  if (data[pyKey] !== undefined) return data[pyKey];
-  
-  // Try toFixed(2) format: 50 -> "50.00"
-  const fixedKey = strike.toFixed(2);
-  if (data[fixedKey] !== undefined) return data[fixedKey];
-  
-  return undefined;
-}
-
-// Format date as YYYY-MM-DD
-function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-// Format datetime as YYYY-MM-DD HH:MM
-function formatDateTime(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hours = String(d.getHours()).padStart(2, '0');
-  const mins = String(d.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${mins}`;
 }
 
 export function PayoffDashboard() {
@@ -254,11 +177,6 @@ export function PayoffDashboard() {
   // Privacy Mode - hide absolute dollar values
   const [privacyMode, setPrivacyMode] = useState(false);
   
-  // Helper to mask currency values in privacy mode
-  const formatPrivateCurrency = (value: number): string => {
-    if (privacyMode) return '***';
-    return formatCurrency(value);
-  };
   
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
@@ -279,7 +197,7 @@ export function PayoffDashboard() {
   const toggleLegInStrategy = (expiry: string, strike: number, right: "C" | "P", action: "BUY" | "SELL", mid: number) => {
     if (!selectedTicker) return;
 
-    const expiryNoDashes = expiry.replace(/-/g, "");
+    const expiryNoDashes = expiryWithoutDashes(expiry);
 
     // Check if this exact leg exists (same expiry, strike, right, AND action)
     const existingIndex = selectedLegs.findIndex(
@@ -327,9 +245,7 @@ export function PayoffDashboard() {
     if (!optionsChain) return 0;
     // Convert expiry from YYYYMMDD to the format used in optionsChain
     // The chain might use YYYY-MM-DD or YYYYMMDD, try both formats
-    const expiryWithDashes = leg.expiry.length === 8 
-      ? `${leg.expiry.slice(0,4)}-${leg.expiry.slice(4,6)}-${leg.expiry.slice(6,8)}`
-      : leg.expiry;
+    const expiryWithDashes = formatExpiry(leg.expiry);
     
     const quote = leg.right === "C" 
       ? (getStrikeQuote(optionsChain.calls, leg.expiry, leg.strike) || getStrikeQuote(optionsChain.calls, expiryWithDashes, leg.strike)) as OptionQuote | undefined
@@ -343,7 +259,7 @@ export function PayoffDashboard() {
   // Check if a specific cell (bid/ask) is selected in the strategy builder
   // action: "SELL" = bid column, "BUY" = ask column
   const isLegSelected = (expiry: string, strike: number, right: "C" | "P", action: "BUY" | "SELL"): boolean => {
-    const expiryNoDashes = expiry.replace(/-/g, "");
+    const expiryNoDashes = expiryWithoutDashes(expiry);
     return selectedLegs.some(
       l => (l.expiry === expiry || l.expiry === expiryNoDashes) && l.strike === strike && l.right === right && l.action === action
     );
@@ -363,7 +279,7 @@ export function PayoffDashboard() {
     
     return legs.map(leg => {
       // Get the quote for pricing
-      const expiryWithDashes = `${leg.expiry.slice(0,4)}-${leg.expiry.slice(4,6)}-${leg.expiry.slice(6,8)}`;
+      const expiryWithDashes = formatExpiry(leg.expiry);
       const quote = leg.right === "C"
         ? (getStrikeQuote(optionsChain.calls, leg.expiry, leg.strike) || getStrikeQuote(optionsChain.calls, expiryWithDashes, leg.strike)) as OptionQuote | undefined
         : (getStrikeQuote(optionsChain.puts, leg.expiry, leg.strike) || getStrikeQuote(optionsChain.puts, expiryWithDashes, leg.strike)) as OptionQuote | undefined;
@@ -1246,10 +1162,7 @@ export function PayoffDashboard() {
     return { delta, gamma, theta, vega };
   }, [activePositions]);
 
-  const formatCurrency = (value: number) =>
-    `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-  const formatBound = (value: number) =>
-    Number.isFinite(value) ? formatCurrency(value) : "∞";
+  const formatBound = (value: number) => formatCurrencyOrInfinity(value);
 
   const summaryUnrealizedPnl = useMemo(() => {
     if (!accountSummaries || Object.keys(accountSummaries).length === 0) return null;
@@ -1396,14 +1309,14 @@ export function PayoffDashboard() {
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Net Liq</div>
                     <div className="text-lg font-bold text-white">
-                      {formatPrivateCurrency(accountSummaries[selectedAccount].net_liquidation)}
+                      {formatPrivateCurrency(accountSummaries[selectedAccount].net_liquidation, privacyMode)}
                     </div>
                   </div>
                 ) : (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Total Net Liq</div>
                     <div className="text-lg font-bold text-white">
-                      {formatPrivateCurrency(totalNetLiq)}
+                      {formatPrivateCurrency(totalNetLiq, privacyMode)}
                     </div>
                   </div>
                 )}
@@ -1421,14 +1334,14 @@ export function PayoffDashboard() {
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${accountSummaries[selectedAccount].daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].daily_pnl)}
+                      {accountSummaries[selectedAccount].daily_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].daily_pnl, privacyMode)}
                     </div>
                   </div>
                 ) : (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatPrivateCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0))}
+                      {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatPrivateCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0), privacyMode)}
                     </div>
                   </div>
                 )}
@@ -1438,14 +1351,14 @@ export function PayoffDashboard() {
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
                     <div className={`text-lg font-bold ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].realized_pnl)}
+                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].realized_pnl, privacyMode)}
                     </div>
                   </div>
                 ) : (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
                     <div className={`text-lg font-bold ${totalRealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {totalRealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(totalRealizedPnl)}
+                      {totalRealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(totalRealizedPnl, privacyMode)}
                     </div>
                   </div>
                 )}
@@ -1457,7 +1370,7 @@ export function PayoffDashboard() {
           <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
             <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Unrealized</div>
             <div className={`text-lg font-bold ${portfolioUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(portfolioUnrealizedPnl)}
+              {portfolioUnrealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(portfolioUnrealizedPnl, privacyMode)}
             </div>
           </div>
           
@@ -1470,7 +1383,7 @@ export function PayoffDashboard() {
               <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                 <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Buying Power</div>
                 <div className="text-lg font-bold text-cyan-400">
-                  {formatPrivateCurrency(totalBuyingPower)}
+                  {formatPrivateCurrency(totalBuyingPower, privacyMode)}
                 </div>
               </div>
             ) : null;
@@ -1648,25 +1561,25 @@ export function PayoffDashboard() {
                             ${s.underlyingPrice.toFixed(2)}
                           </td>
                           <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${s.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {s.unrealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(s.unrealizedPnl)}
+                            {s.unrealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(s.unrealizedPnl, privacyMode)}
                           </td>
                           <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${s.unrealizedPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.unrealizedPnlPct >= 0 ? '+' : ''}{s.unrealizedPnlPct.toFixed(1)}%
                           </td>
                           <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${s.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {s.dailyPnl >= 0 ? '+' : ''}{formatPrivateCurrency(s.dailyPnl)}
+                            {s.dailyPnl >= 0 ? '+' : ''}{formatPrivateCurrency(s.dailyPnl, privacyMode)}
                           </td>
                           <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${s.dailyPnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {s.dailyPnlPct >= 0 ? '+' : ''}{s.dailyPnlPct.toFixed(1)}%
                           </td>
                           <td className="text-right py-2 px-2 font-mono text-gray-300 border-l border-r border-white/10">
-                            {formatPrivateCurrency(Math.abs(s.marketValue))}
+                            {formatPrivateCurrency(Math.abs(s.marketValue), privacyMode)}
                           </td>
                           <td className="text-right py-2 px-2 font-mono text-red-400">
-                            {Number.isFinite(s.maxLoss) ? formatPrivateCurrency(Math.abs(s.maxLoss)) : '∞'}
+                            {Number.isFinite(s.maxLoss) ? formatPrivateCurrency(Math.abs(s.maxLoss), privacyMode) : '∞'}
                           </td>
                           <td className="text-right py-2 px-2 font-mono text-green-400">
-                            {Number.isFinite(s.maxProfit) ? formatPrivateCurrency(s.maxProfit) : '∞'}
+                            {Number.isFinite(s.maxProfit) ? formatPrivateCurrency(s.maxProfit, privacyMode) : '∞'}
                           </td>
                         </tr>
                       ))
@@ -1725,19 +1638,19 @@ export function PayoffDashboard() {
                                 ${(stockPrices[p.ticker] || p.underlying_price || 0).toFixed(2)}
                               </td>
                               <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${(p.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {(p.unrealized_pnl || 0) >= 0 ? '+' : ''}${(p.unrealized_pnl || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                {(p.unrealized_pnl || 0) >= 0 ? '+' : ''}{formatCurrency(p.unrealized_pnl || 0)}
                               </td>
                               <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${unrealizedPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {unrealizedPct >= 0 ? '+' : ''}{unrealizedPct.toFixed(1)}%
                               </td>
                               <td className={`text-right py-2 px-2 font-mono font-medium border-l border-white/10 ${(p.daily_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {(p.daily_pnl || 0) >= 0 ? '+' : ''}${(p.daily_pnl || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                {(p.daily_pnl || 0) >= 0 ? '+' : ''}{formatCurrency(p.daily_pnl || 0)}
                               </td>
                               <td className={`text-right py-2 px-2 font-mono text-xs border-r border-white/10 ${dailyPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {dailyPct >= 0 ? '+' : ''}{dailyPct.toFixed(1)}%
                               </td>
                               <td className="text-right py-2 px-2 font-mono text-gray-300 border-l border-r border-white/10">
-                                ${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                {formatCurrency(marketValue)}
                               </td>
                               <td className="text-right py-2 px-2 font-mono text-gray-500">
                                 -
@@ -1850,13 +1763,13 @@ export function PayoffDashboard() {
                           <div>
                             <div className="text-gray-500">Unrealized</div>
                             <div className={pnl.unrealized >= 0 ? "text-green-400" : "text-red-400"}>
-                              {pnl.unrealized >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.unrealized)}
+                              {pnl.unrealized >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.unrealized, privacyMode)}
                             </div>
                           </div>
                           <div className="text-right">
                             <div className="text-gray-500">Today</div>
                             <div className={pnl.daily >= 0 ? "text-green-400" : "text-red-400"}>
-                              {pnl.daily >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.daily)}
+                              {pnl.daily >= 0 ? '+' : ''}{formatPrivateCurrency(pnl.daily, privacyMode)}
                             </div>
                           </div>
                         </div>
@@ -1892,7 +1805,7 @@ export function PayoffDashboard() {
                       {perTickerPnl[selectedTicker] && (
                         <div className={`flex items-center gap-1 text-sm font-medium ${perTickerPnl[selectedTicker].daily >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                           <span className="text-xl">{perTickerPnl[selectedTicker].daily >= 0 ? '▲' : '▼'}</span>
-                          <span>{perTickerPnl[selectedTicker].daily >= 0 ? '+' : ''}{formatPrivateCurrency(perTickerPnl[selectedTicker].daily)}</span>
+                          <span>{perTickerPnl[selectedTicker].daily >= 0 ? '+' : ''}{formatPrivateCurrency(perTickerPnl[selectedTicker].daily, privacyMode)}</span>
                         </div>
                       )}
                     </div>
@@ -2143,7 +2056,7 @@ export function PayoffDashboard() {
                                         </div>
                                         {pos.unrealized_pnl !== undefined && (
                                             <div className={`text-xs font-mono font-bold ${pos.unrealized_pnl >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
-                                                {pos.unrealized_pnl >= 0 ? "+" : ""}{pos.unrealized_pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                {pos.unrealized_pnl >= 0 ? "+" : ""}{formatCurrency(pos.unrealized_pnl)}
                                             </div>
                                         )}
                                     </div>
@@ -2184,7 +2097,7 @@ export function PayoffDashboard() {
                         <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
                             <p className="text-xs text-blue-400 font-medium uppercase tracking-wider">Unrealized P&L</p>
                             <p className={`text-2xl font-light mt-1 ${totalUnrealizedPnl >= 0 ? "text-blue-300" : "text-red-300"}`}>
-                                {totalUnrealizedPnl >= 0 ? "+" : ""}${totalUnrealizedPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                {totalUnrealizedPnl >= 0 ? "+" : ""}{formatCurrency(totalUnrealizedPnl)}
                             </p>
                         </div>
                     </div>
@@ -2395,12 +2308,12 @@ export function PayoffDashboard() {
                             </div>
                             {tradeOrderType === "MARKET" && currentPrice > 0 && (
                               <div className="text-sm text-gray-500 mt-1">
-                                Est. Value: ${(tradeQuantity * currentPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                Est. Value: {formatCurrency(tradeQuantity * currentPrice, 2)}
                               </div>
                             )}
                             {tradeOrderType === "LIMIT" && tradeLimitPrice && parseFloat(tradeLimitPrice) > 0 && (
                               <div className="text-sm text-gray-500 mt-1">
-                                Est. Value: ${(tradeQuantity * parseFloat(tradeLimitPrice)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                Est. Value: {formatCurrency(tradeQuantity * parseFloat(tradeLimitPrice), 2)}
                               </div>
                             )}
                           </div>
@@ -2798,7 +2711,7 @@ export function PayoffDashboard() {
                                 <p className="text-[10px] text-green-400 uppercase tracking-wider">Max Profit</p>
                                 <p className="text-sm font-medium text-green-300">
                                   {Number.isFinite(strategyPayoffData.maxProfit) 
-                                    ? `$${strategyPayoffData.maxProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                    ? formatCurrency(strategyPayoffData.maxProfit)
                                     : "∞"}
                                 </p>
                               </div>
@@ -2806,7 +2719,7 @@ export function PayoffDashboard() {
                                 <p className="text-[10px] text-red-400 uppercase tracking-wider">Max Loss</p>
                                 <p className="text-sm font-medium text-red-300">
                                   {Number.isFinite(strategyPayoffData.maxLoss)
-                                    ? `$${Math.abs(strategyPayoffData.maxLoss).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                    ? formatCurrency(Math.abs(strategyPayoffData.maxLoss))
                                     : "∞"}
                                 </p>
                               </div>
