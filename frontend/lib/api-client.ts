@@ -1,9 +1,10 @@
 import { Position, AccountSummary } from "./payoff-utils";
 
-// Use current hostname for API calls - works on localhost and LAN
+const envApiBase = process.env.NEXT_PUBLIC_API_BASE;
+// Default to same-origin so Next can proxy /api to the backend (works with ngrok).
 const API_BASE = typeof window !== 'undefined'
-    ? `http://${window.location.hostname}:8000`
-    : "http://localhost:8000";
+    ? (envApiBase || '')
+    : (envApiBase || "http://127.0.0.1:8000");
 
 // Generic API request wrapper to eliminate duplicate try-catch patterns
 async function apiRequest<T>(
@@ -426,4 +427,3 @@ export async function fetchTickerNewsAnalysis(
         return { error: e instanceof Error ? e.message : "Failed to analyze news" };
     }
 }
-
