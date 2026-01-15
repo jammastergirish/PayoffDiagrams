@@ -377,7 +377,7 @@ def get_market_news(limit: int = 25) -> dict:
     seen_headlines = set()  # For deduplication
 
     # Market tickers to fetch news from
-    market_tickers = ["SPY", "QQQ", "DIA"]
+    market_tickers = ["SPY", "QQQ", "DIA", "IWM", "VIX", "GOLD"]
 
     for ticker in market_tickers:
         # Fetch from both sources using helper functions
