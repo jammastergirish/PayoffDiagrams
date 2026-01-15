@@ -1,8 +1,10 @@
 """Common utility functions."""
 
 import math
-from typing import Any, Optional, Dict, List
+import traceback
+from typing import Any, Optional, Dict, List, Callable
 from datetime import datetime, timedelta
+from functools import wraps
 
 
 def safe_float(val: Any, default: float = 0.0) -> float:
@@ -98,3 +100,148 @@ def group_positions_by_ticker(positions: List[Dict[str, Any]]) -> Dict[str, List
             grouped[ticker] = []
         grouped[ticker].append(pos)
     return grouped
+
+
+# ======================
+# Error Handling Utilities
+# ======================
+
+def with_error_handling(
+    operation_name: str,
+    module_name: str = "API",
+    default_return: Optional[Any] = None,
+    include_traceback: bool = False
+):
+    """
+    Decorator for standardized error handling.
+
+    Args:
+        operation_name: Description of the operation for error messages
+        module_name: Name of the module for error logging
+        default_return: Default return value on error
+        include_traceback: Whether to print traceback on error
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                error_msg = f"ERROR [{module_name}]: Failed to {operation_name}"
+
+                # Include symbol/identifier in error message if available
+                if args and hasattr(args[0], '__self__'):
+                    # Method call - look for symbol in args
+                    func_args = args[1:] if len(args) > 1 else []
+                else:
+                    # Function call
+                    func_args = args
+
+                if func_args:
+                    # Try to find symbol/identifier in first argument
+                    first_arg = func_args[0]
+                    if isinstance(first_arg, str):
+                        error_msg += f" for {first_arg}"
+
+                error_msg += f": {e}"
+                print(error_msg)
+
+                if include_traceback:
+                    traceback.print_exc()
+
+                # Return appropriate error response based on default_return type
+                if default_return is None:
+                    return format_error_response(str(e))
+                elif isinstance(default_return, dict):
+                    result = default_return.copy()
+                    result["error"] = str(e)
+                    return result
+                else:
+                    return default_return
+
+        return wrapper
+    return decorator
+
+
+def handle_api_error(
+    operation_name: str,
+    symbol: Optional[str] = None,
+    module_name: str = "API",
+    include_traceback: bool = False,
+    additional_data: Optional[Dict[str, Any]] = None
+) -> Callable:
+    """
+    Context manager and decorator for API error handling with symbol-aware responses.
+
+    Args:
+        operation_name: Description of the operation
+        symbol: Symbol being processed (for error response)
+        module_name: Module name for logging
+        include_traceback: Whether to print full traceback
+        additional_data: Additional data to include in error response
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Dict[str, Any]:
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                # Extract symbol from args if not provided
+                actual_symbol = symbol
+                if actual_symbol is None and args:
+                    # Try to get symbol from first argument
+                    first_arg = args[1] if len(args) > 1 and hasattr(args[0], '__self__') else (args[0] if args else None)
+                    if isinstance(first_arg, str):
+                        actual_symbol = first_arg.upper()
+
+                error_msg = f"ERROR [{module_name}]: Failed to {operation_name}"
+                if actual_symbol:
+                    error_msg += f" for {actual_symbol}"
+                error_msg += f": {e}"
+                print(error_msg)
+
+                if include_traceback:
+                    traceback.print_exc()
+
+                # Create standardized error response
+                response = {}
+                if actual_symbol:
+                    response["symbol"] = actual_symbol
+                response["error"] = str(e)
+
+                if additional_data:
+                    response.update(additional_data)
+
+                return response
+
+        return wrapper
+    return decorator
+
+
+def safe_execute(
+    func: Callable,
+    *args,
+    operation_name: str = "operation",
+    default_return: Any = None,
+    log_errors: bool = True,
+    **kwargs
+) -> Any:
+    """
+    Safely execute a function with error handling.
+
+    Args:
+        func: Function to execute
+        *args: Arguments for the function
+        operation_name: Name of operation for error logging
+        default_return: Return value if function fails
+        log_errors: Whether to log errors
+        **kwargs: Keyword arguments for the function
+    """
+    try:
+        return func(*args, **kwargs)
+    except Exception as e:
+        if log_errors:
+            print(f"ERROR: Failed to {operation_name}: {e}")
+        return default_return

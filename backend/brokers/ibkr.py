@@ -11,7 +11,7 @@ import nest_asyncio
 import random
 from .base import BrokerInterface
 from ..common.models import Position, AccountSummary, TradeOrder, OptionOrder
-from ..common.utils import safe_float, format_error_response, format_success_response
+from ..common.utils import safe_float, safe_int, format_error_response, format_success_response, validate_symbol
 
 # Apply nest_asyncio to allow nested loops if needed, though threading should isolate it
 nest_asyncio.apply()
@@ -91,17 +91,6 @@ class IBClient:
             self._thread.start()
             await asyncio.sleep(1)
 
-    def _safe_float(self, val, default=0.0):
-        """Converts value to float, handling None and NaN."""
-        if val is None:
-            return default
-        try:
-            f_val = float(val)
-            if math.isnan(f_val) or math.isinf(f_val):
-                return default
-            return f_val
-        except (ValueError, TypeError):
-            return default
 
     def _ensure_market_data(self, contract):
         """Subscribes to market data if not already subscribed."""
@@ -221,8 +210,8 @@ class IBClient:
 
                 if ticker is not None:
                     print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType}")
-                    current_price = self._safe_float(ticker.marketPrice()) or self._safe_float(ticker.last) or self._safe_float(ticker.close) or 0.0
-                    prior_close = self._safe_float(ticker.close)
+                    current_price = safe_float(ticker.marketPrice()) or safe_float(ticker.last) or safe_float(ticker.close) or 0.0
+                    prior_close = safe_float(ticker.close)
 
                     # Greeks extraction
                     # IBKR provides Greeks in standard format:
@@ -232,12 +221,12 @@ class IBClient:
                     # - Vega: change in option price per 1% change in IV
                     # - IV: Implied Volatility as decimal (0.30 = 30%)
                     if ticker.modelGreeks:
-                        delta = self._safe_float(ticker.modelGreeks.delta)
-                        gamma = self._safe_float(ticker.modelGreeks.gamma)
-                        theta = self._safe_float(ticker.modelGreeks.theta)
-                        vega = self._safe_float(ticker.modelGreeks.vega)
-                        iv = self._safe_float(ticker.modelGreeks.impliedVol)
-                        und_price = self._safe_float(ticker.modelGreeks.undPrice)
+                        delta = safe_float(ticker.modelGreeks.delta)
+                        gamma = safe_float(ticker.modelGreeks.gamma)
+                        theta = safe_float(ticker.modelGreeks.theta)
+                        vega = safe_float(ticker.modelGreeks.vega)
+                        iv = safe_float(ticker.modelGreeks.impliedVol)
+                        und_price = safe_float(ticker.modelGreeks.undPrice)
                 else:
                     print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType} (no ticker data yet)")
 
@@ -248,7 +237,7 @@ class IBClient:
                      # Search through all tickers we are connected to
                      for t in self.ib.tickers():
                          if t.contract.symbol == contract.symbol and t.contract.secType == 'STK':
-                             found_price = self._safe_float(t.marketPrice()) or self._safe_float(t.last) or self._safe_float(t.close)
+                             found_price = safe_float(t.marketPrice()) or safe_float(t.last) or safe_float(t.close)
                              if found_price > 0:
                                  break
 
@@ -275,17 +264,17 @@ class IBClient:
 
                 pos_daily_pnl = 0.0
                 if current_price > 0 and prior_close > 0:
-                    pos_daily_pnl = (current_price - prior_close) * self._safe_float(pos.position) * multiplier
+                    pos_daily_pnl = (current_price - prior_close) * safe_float(pos.position) * multiplier
 
                 if contract.secType == 'STK':
                     mapped_positions.append({
                         "ticker": contract.symbol,
                         "account": pos.account,
                         "position_type": "stock",
-                        "qty": self._safe_float(pos.position),
-                        "cost_basis": self._safe_float(pos.avgCost),
+                        "qty": safe_float(pos.position),
+                        "cost_basis": safe_float(pos.avgCost),
                         "current_price": current_price,
-                        "unrealized_pnl": (current_price - self._safe_float(pos.avgCost)) * self._safe_float(pos.position) if current_price else 0.0,
+                        "unrealized_pnl": (current_price - safe_float(pos.avgCost)) * safe_float(pos.position) if current_price else 0.0,
                         "daily_pnl": pos_daily_pnl,
                         "delta": 1.0,
                         "gamma": 0.0, "theta": 0.0, "vega": 0.0, "iv": 0.0
@@ -317,12 +306,12 @@ class IBClient:
                     if (pnl == 0.0 or not found_in_portfolio) and current_price > 0:
                          # (Mark - AvgCost) * Qty * Multiplier
                          # Using 100 as multiplier for standard US options.
-                         pnl = (current_price - self._safe_float(pos.avgCost)) * self._safe_float(pos.position) * 100.0
+                         pnl = (current_price - safe_float(pos.avgCost)) * safe_float(pos.position) * 100.0
 
                     # IMPORTANT: IBKR returns avgCost as total cost per 100 shares
                     # e.g., if you paid $5 per contract, avgCost = 500
                     # Frontend expects per-contract premium, so divide by 100
-                    avg_cost_per_share = self._safe_float(pos.avgCost)
+                    avg_cost_per_share = safe_float(pos.avgCost)
                     cost_basis_per_contract = avg_cost_per_share / 100.0 if avg_cost_per_share else 0.0
 
                     print(f"DEBUG OPT: {contract.symbol} {contract.right}{contract.strike} exp={expiry_formatted} qty={pos.position} avgCost={pos.avgCost} cost_basis={cost_basis_per_contract} und_price={und_price} strike={contract.strike}")
@@ -331,11 +320,11 @@ class IBClient:
                         "ticker": contract.symbol,
                         "account": pos.account,
                         "position_type": "call" if contract.right == 'C' else "put",
-                        "qty": self._safe_float(pos.position),
-                        "strike": self._safe_float(contract.strike),
+                        "qty": safe_float(pos.position),
+                        "strike": safe_float(contract.strike),
                         "expiry": expiry_formatted,
                         "cost_basis": cost_basis_per_contract,
-                        "unrealized_pnl": self._safe_float(pnl),
+                        "unrealized_pnl": safe_float(pnl),
                         "daily_pnl": pos_daily_pnl,
                         "current_price": current_price,
                         "underlying_price": und_price,
@@ -369,17 +358,17 @@ class IBClient:
                         }
 
                     if val.tag == 'NetLiquidation':
-                        accounts_summary[acc_id]["net_liquidation"] = self._safe_float(val.value)
+                        accounts_summary[acc_id]["net_liquidation"] = safe_float(val.value)
                     elif val.tag == 'BuyingPower':
-                        accounts_summary[acc_id]["buying_power"] = self._safe_float(val.value)
+                        accounts_summary[acc_id]["buying_power"] = safe_float(val.value)
 
             # Second pass: get P&L from reqPnL subscriptions (the CORRECT source)
             for acc_id in list(accounts_summary.keys()):
                 pnl_obj = self._ensure_pnl_subscription(acc_id)
                 if pnl_obj:
-                    accounts_summary[acc_id]["daily_pnl"] = self._safe_float(pnl_obj.dailyPnL)
-                    accounts_summary[acc_id]["unrealized_pnl"] = self._safe_float(pnl_obj.unrealizedPnL)
-                    accounts_summary[acc_id]["realized_pnl"] = self._safe_float(pnl_obj.realizedPnL)
+                    accounts_summary[acc_id]["daily_pnl"] = safe_float(pnl_obj.dailyPnL)
+                    accounts_summary[acc_id]["unrealized_pnl"] = safe_float(pnl_obj.unrealizedPnL)
+                    accounts_summary[acc_id]["realized_pnl"] = safe_float(pnl_obj.realizedPnL)
                     print(f"DEBUG: P&L for {acc_id}: daily={pnl_obj.dailyPnL}, unrealized={pnl_obj.unrealizedPnL}, realized={pnl_obj.realizedPnL}")
 
             if accounts_summary:
@@ -433,27 +422,27 @@ class IBClient:
             dict with success status, order_id, and message/error
         """
         if not self.connected or not self.ib.isConnected():
-            return {"success": False, "error": "Not connected to IBKR"}
+            return format_error_response("Not connected to IBKR", success=False)
 
         # Validate inputs
         action = action.upper()
         if action not in ("BUY", "SELL"):
-            return {"success": False, "error": "Action must be BUY or SELL"}
+            return format_error_response("Action must be BUY or SELL", success=False)
 
         order_type = order_type.upper()
         if order_type not in ("MARKET", "LIMIT"):
-            return {"success": False, "error": "Order type must be MARKET or LIMIT"}
+            return format_error_response("Order type must be MARKET or LIMIT", success=False)
 
         if order_type == "LIMIT" and (limit_price is None or limit_price <= 0):
-            return {"success": False, "error": "Limit price required for LIMIT orders"}
+            return format_error_response("Limit price required for LIMIT orders", success=False)
 
         if quantity <= 0:
-            return {"success": False, "error": "Quantity must be positive"}
+            return format_error_response("Quantity must be positive", success=False)
 
         try:
             # Create contract - SMART exchange handles routing for US stocks
             # Don't use qualifyContracts() as it blocks waiting for IB event loop
-            contract = Stock(symbol.upper(), 'SMART', 'USD')
+            contract = Stock(validate_symbol(symbol), 'SMART', 'USD')
 
             # Create order
             if order_type == "MARKET":
@@ -480,7 +469,7 @@ class IBClient:
             print(f"Error placing order: {e}")
             import traceback
             traceback.print_exc()
-            return {"success": False, "error": str(e)}
+            return format_error_response(str(e), success=False)
 
     def place_options_order(self, legs: list, order_type: str = "MARKET", limit_price: float = None) -> dict:
         """
@@ -530,9 +519,9 @@ class IBClient:
                 # For fully specified options (symbol, expiry, strike, right, exchange, currency),
                 # IBKR can resolve the contract directly when placing the order
                 contract = Option(
-                    symbol=leg["symbol"].upper(),
+                    symbol=validate_symbol(leg["symbol"]),
                     lastTradeDateOrContractMonth=expiry,
-                    strike=float(leg["strike"]),
+                    strike=safe_float(leg["strike"]),
                     right=right,
                     exchange='SMART',
                     currency='USD'
@@ -540,7 +529,7 @@ class IBClient:
 
                 # Create order
                 action = leg["action"].upper()
-                quantity = int(leg["quantity"])
+                quantity = safe_int(leg["quantity"], 1)
 
                 if order_type.upper() == "MARKET":
                     order = MarketOrder(action, quantity)
@@ -592,16 +581,16 @@ class IBClient:
                     print(f"DEBUG: Leg {i+1} - Symbol: {leg['symbol'].upper()}, Expiry: {expiry}, Strike: {leg['strike']}, Right: {right}, Action: {leg['action']}")
 
                     contract = Option(
-                        symbol=leg["symbol"].upper(),
+                        symbol=validate_symbol(leg["symbol"]),
                         lastTradeDateOrContractMonth=expiry,
-                        strike=float(leg["strike"]),
+                        strike=safe_float(leg["strike"]),
                         right=right,
                         exchange='SMART',
                         currency='USD'
                     )
 
                     action = leg["action"].upper()
-                    quantity = int(leg["quantity"])
+                    quantity = safe_int(leg["quantity"], 1)
 
                     if order_type.upper() == "MARKET":
                         order = MarketOrder(action, quantity)
@@ -633,7 +622,7 @@ class IBClient:
             print(f"Error placing options order: {e}")
             import traceback
             traceback.print_exc()
-            return {"success": False, "error": str(e)}
+            return format_error_response(str(e), success=False)
 
     def disconnect(self):
         if self.connected:

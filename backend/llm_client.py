@@ -8,6 +8,7 @@ import os
 from typing import Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from .common.utils import format_error_response
 
 load_dotenv()
 
@@ -63,7 +64,7 @@ def _call_openai(system_prompt: str, user_prompt: str, max_tokens: int = DEFAULT
         Dict with 'summary' string or 'error' if failed
     """
     if not _client:
-        return {"error": "OpenAI API key not configured"}
+        return format_error_response("OpenAI API key not configured")
     
     try:
         response = _client.chat.completions.create(
@@ -81,7 +82,7 @@ def _call_openai(system_prompt: str, user_prompt: str, max_tokens: int = DEFAULT
         
     except Exception as e:
         print(f"ERROR [LLM]: API call failed: {e}")
-        return {"error": str(e)}
+        return format_error_response(str(e))
 
 
 def analyze_market_news(articles: list[dict], tickers: list[str]) -> dict:
@@ -96,7 +97,7 @@ def analyze_market_news(articles: list[dict], tickers: list[str]) -> dict:
         Dict with 'summary' string or 'error' if failed
     """
     if not articles:
-        return {"error": "No articles provided"}
+        return format_error_response("No articles provided")
     
     # Convert to NewsArticle objects
     news_articles = [NewsArticle(**a) if isinstance(a, dict) else a for a in articles]
@@ -125,10 +126,10 @@ def analyze_ticker_news(articles: list[dict], ticker: str) -> dict:
         Dict with 'summary' string or 'error' if failed
     """
     if not articles:
-        return {"error": "No articles provided"}
+        return format_error_response("No articles provided")
     
     if not ticker:
-        return {"error": "No ticker provided"}
+        return format_error_response("No ticker provided")
     
     # Convert to NewsArticle objects
     news_articles = [NewsArticle(**a) if isinstance(a, dict) else a for a in articles]

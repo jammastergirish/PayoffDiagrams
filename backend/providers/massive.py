@@ -8,6 +8,7 @@ from massive import RESTClient
 from .base import DataProviderInterface
 from ..common.models import HistoricalBar
 from ..common.cache import historical_cache, snapshot_cache, news_cache, options_cache
+from ..common.utils import handle_api_error, safe_float, safe_int, validate_symbol
 
 # Load environment variables from .env file
 load_dotenv()
@@ -30,6 +31,7 @@ TIMEFRAME_CONFIG = {
     "1H": {"multiplier": 1, "timespan": "minute", "days_back": 0, "hours_back": 1},
 }
 
+@handle_api_error("fetch historical data", module_name="Massive", additional_data={"bars": []})
 def get_historical_bars(symbol: str, timeframe: str = "1M") -> dict:
     """
     Fetch historical OHLC bars from Massive.com API.
@@ -41,6 +43,8 @@ def get_historical_bars(symbol: str, timeframe: str = "1M") -> dict:
     Returns:
         Dict with symbol, timeframe, and bars list
     """
+    symbol = validate_symbol(symbol)
+
     if not _client:
         return {
             "symbol": symbol,
@@ -62,59 +66,46 @@ def get_historical_bars(symbol: str, timeframe: str = "1M") -> dict:
     from_str = from_date.strftime("%Y-%m-%d")
     to_str = now.strftime("%Y-%m-%d")
 
-    try:
-        # Call Massive.com Aggregates (Bars) API
-        # GET /v2/aggs/ticker/{stocksTicker}/range/{multiplier}/{timespan}/{from}/{to}
-        aggs = _client.get_aggs(
-            ticker=symbol.upper(),
-            multiplier=config["multiplier"],
-            timespan=config["timespan"],
-            from_=from_str,
-            to=to_str,
-            adjusted=True,
-            sort="asc",
-            limit=50000
-        )
+    # Call Massive.com Aggregates (Bars) API
+    aggs = _client.get_aggs(
+        ticker=symbol,
+        multiplier=config["multiplier"],
+        timespan=config["timespan"],
+        from_=from_str,
+        to=to_str,
+        adjusted=True,
+        sort="asc",
+        limit=50000
+    )
 
-        # Convert response to our bar format
-        # The massive package returns a list of Agg objects directly
-        bars = []
-        if aggs:
-            for agg in aggs:
-                # Convert timestamp (milliseconds) to ISO date string
-                ts_ms = agg.timestamp if hasattr(agg, 'timestamp') else (agg.t if hasattr(agg, 't') else 0)
-                dt = datetime.fromtimestamp(ts_ms / 1000)
+    # Convert response to our bar format using safe conversion utilities
+    bars = []
+    if aggs:
+        for agg in aggs:
+            # Convert timestamp (milliseconds) to ISO date string
+            ts_ms = agg.timestamp if hasattr(agg, 'timestamp') else (agg.t if hasattr(agg, 't') else 0)
+            dt = datetime.fromtimestamp(ts_ms / 1000)
 
-                bars.append({
-                    "date": dt.isoformat(),
-                    "open": float(agg.open) if hasattr(agg, 'open') else float(agg.o) if hasattr(agg, 'o') else 0,
-                    "high": float(agg.high) if hasattr(agg, 'high') else float(agg.h) if hasattr(agg, 'h') else 0,
-                    "low": float(agg.low) if hasattr(agg, 'low') else float(agg.l) if hasattr(agg, 'l') else 0,
-                    "close": float(agg.close) if hasattr(agg, 'close') else float(agg.c) if hasattr(agg, 'c') else 0,
-                    "volume": int(agg.volume) if hasattr(agg, 'volume') else int(agg.v) if hasattr(agg, 'v') else 0,
-                    "vwap": float(agg.vwap) if hasattr(agg, 'vwap') else float(agg.vw) if hasattr(agg, 'vw') else None,
-                    "transactions": int(agg.transactions) if hasattr(agg, 'transactions') else int(agg.n) if hasattr(agg, 'n') else None,
-                })
+            bars.append({
+                "date": dt.isoformat(),
+                "open": safe_float(getattr(agg, 'open', getattr(agg, 'o', 0))),
+                "high": safe_float(getattr(agg, 'high', getattr(agg, 'h', 0))),
+                "low": safe_float(getattr(agg, 'low', getattr(agg, 'l', 0))),
+                "close": safe_float(getattr(agg, 'close', getattr(agg, 'c', 0))),
+                "volume": safe_int(getattr(agg, 'volume', getattr(agg, 'v', 0))),
+                "vwap": safe_float(getattr(agg, 'vwap', getattr(agg, 'vw', None))),
+                "transactions": safe_int(getattr(agg, 'transactions', getattr(agg, 'n', None))),
+            })
 
-        print(f"DEBUG [Massive]: Retrieved {len(bars)} bars for {symbol} ({timeframe})")
+    print(f"DEBUG [Massive]: Retrieved {len(bars)} bars for {symbol} ({timeframe})")
 
-        return {
-            "symbol": symbol.upper(),
-            "timeframe": timeframe.upper(),
-            "bars": bars
-        }
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe.upper(),
+        "bars": bars
+    }
 
-    except Exception as e:
-        print(f"ERROR [Massive]: Failed to fetch historical data for {symbol}: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "symbol": symbol.upper(),
-            "timeframe": timeframe.upper(),
-            "bars": [],
-            "error": str(e)
-        }
-
+@handle_api_error("fetch daily snapshot", module_name="Massive")
 def get_daily_snapshot(symbol: str) -> dict:
     """
     Get today's snapshot including current price and daily change.
@@ -125,60 +116,54 @@ def get_daily_snapshot(symbol: str) -> dict:
     Returns:
         Dict with current_price, previous_close, change, change_pct
     """
+    symbol = validate_symbol(symbol)
+
     if not _client:
-        return {"error": "Massive API key not configured"}
+        return {"symbol": symbol, "error": "Massive API key not configured"}
 
-    try:
-        # Get previous close from daily aggregates endpoint
-        # We need the previous day's close and today's current price
-        from_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
-        to_date = datetime.now().strftime("%Y-%m-%d")
+    # Get previous close from daily aggregates endpoint
+    from_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+    to_date = datetime.now().strftime("%Y-%m-%d")
 
-        aggs = _client.get_aggs(
-            ticker=symbol.upper(),
-            multiplier=1,
-            timespan="day",
-            from_=from_date,
-            to=to_date,
-            adjusted=True,
-            sort="desc",
-            limit=2
-        )
+    aggs = _client.get_aggs(
+        ticker=symbol,
+        multiplier=1,
+        timespan="day",
+        from_=from_date,
+        to=to_date,
+        adjusted=True,
+        sort="desc",
+        limit=2
+    )
 
-        if aggs and len(aggs) >= 1:
-            # Most recent bar has current price (close), previous bar has prev close
-            current = aggs[0]
-            current_price = float(current.close) if hasattr(current, 'close') else float(current.c) if hasattr(current, 'c') else 0
+    if aggs and len(aggs) >= 1:
+        # Most recent bar has current price (close), previous bar has prev close
+        current = aggs[0]
+        current_price = safe_float(getattr(current, 'close', getattr(current, 'c', 0)))
 
-            if len(aggs) >= 2:
-                prev = aggs[1]
-                prev_close = float(prev.close) if hasattr(prev, 'close') else float(prev.c) if hasattr(prev, 'c') else 0
-            else:
-                prev_close = float(current.open) if hasattr(current, 'open') else float(current.o) if hasattr(current, 'o') else current_price
+        if len(aggs) >= 2:
+            prev = aggs[1]
+            prev_close = safe_float(getattr(prev, 'close', getattr(prev, 'c', 0)))
+        else:
+            prev_close = safe_float(getattr(current, 'open', getattr(current, 'o', current_price)))
 
-            change = current_price - prev_close
-            change_pct = (change / prev_close * 100) if prev_close > 0 else 0
-
-            return {
-                "symbol": symbol.upper(),
-                "current_price": current_price,
-                "previous_close": prev_close,
-                "change": change,
-                "change_pct": change_pct
-            }
+        change = current_price - prev_close
+        change_pct = (change / prev_close * 100) if prev_close > 0 else 0
 
         return {
-            "symbol": symbol.upper(),
-            "error": "No price data available"
+            "symbol": symbol,
+            "current_price": current_price,
+            "previous_close": prev_close,
+            "change": change,
+            "change_pct": change_pct
         }
 
-    except Exception as e:
-        print(f"ERROR [Massive]: Failed to fetch daily snapshot for {symbol}: {e}")
-        return {
-            "symbol": symbol.upper(),
-            "error": str(e)
-        }
+    return {
+        "symbol": symbol,
+        "error": "No price data available"
+    }
 
+@handle_api_error("fetch ticker details", module_name="Massive")
 def get_ticker_details(symbol: str) -> dict:
     """
     Fetch ticker details (company info, branding) from Massive.com API.
@@ -189,45 +174,41 @@ def get_ticker_details(symbol: str) -> dict:
     Returns:
         Dict with ticker details including name, description, branding URLs
     """
+    symbol = validate_symbol(symbol)
+
     if not _client:
-        return {"error": "Massive API key not configured"}
+        return {"symbol": symbol, "error": "Massive API key not configured"}
 
-    try:
-        # GET /v3/reference/tickers/{ticker}
-        # The massive SDK returns a TickerDetails object directly (not wrapped in .results)
-        r = _client.get_ticker_details(ticker=symbol.upper())
+    # GET /v3/reference/tickers/{ticker}
+    r = _client.get_ticker_details(ticker=symbol)
 
-        if r and hasattr(r, 'name'):
-            # Get branding URLs and append API key for authentication
-            logo_url = None
-            icon_url = None
-            if hasattr(r, 'branding') and r.branding:
-                base_logo = getattr(r.branding, 'logo_url', None)
-                base_icon = getattr(r.branding, 'icon_url', None)
-                if base_logo:
-                    logo_url = f"{base_logo}?apiKey={_api_key}"
-                if base_icon:
-                    icon_url = f"{base_icon}?apiKey={_api_key}"
+    if r and hasattr(r, 'name'):
+        # Get branding URLs and append API key for authentication
+        logo_url = None
+        icon_url = None
+        if hasattr(r, 'branding') and r.branding:
+            base_logo = getattr(r.branding, 'logo_url', None)
+            base_icon = getattr(r.branding, 'icon_url', None)
+            if base_logo:
+                logo_url = f"{base_logo}?apiKey={_api_key}"
+            if base_icon:
+                icon_url = f"{base_icon}?apiKey={_api_key}"
 
-            return {
-                "symbol": symbol.upper(),
-                "name": getattr(r, 'name', None),
-                "description": getattr(r, 'description', None),
-                "homepage_url": getattr(r, 'homepage_url', None),
-                "market_cap": getattr(r, 'market_cap', None),
-                "total_employees": getattr(r, 'total_employees', None),
-                "list_date": getattr(r, 'list_date', None),
-                "branding": {
-                    "logo_url": logo_url,
-                    "icon_url": icon_url,
-                } if (logo_url or icon_url) else None
-            }
+        return {
+            "symbol": symbol,
+            "name": getattr(r, 'name', None),
+            "description": getattr(r, 'description', None),
+            "homepage_url": getattr(r, 'homepage_url', None),
+            "market_cap": getattr(r, 'market_cap', None),
+            "total_employees": getattr(r, 'total_employees', None),
+            "list_date": getattr(r, 'list_date', None),
+            "branding": {
+                "logo_url": logo_url,
+                "icon_url": icon_url,
+            } if (logo_url or icon_url) else None
+        }
 
-        return {"symbol": symbol.upper(), "error": "No details found"}
-
-    except Exception as e:
-        print(f"ERROR [Massive]: Failed to fetch ticker details for {symbol}: {e}")
-        return {"symbol": symbol.upper(), "error": str(e)}
+    return {"symbol": symbol, "error": "No details found"}
 
 # =====================
 # News Helper Functions
@@ -278,7 +259,7 @@ def _fetch_benzinga_news(ticker: str, limit: int) -> list:
     headlines = []
     try:
         news_iter = _client.list_benzinga_news_v2(
-            tickers=ticker.upper(),
+            tickers=ticker,
             limit=limit,
             sort="published.desc"
         )
@@ -305,7 +286,7 @@ def _fetch_reference_news(ticker: str, limit: int) -> list:
     headlines = []
     try:
         ref_news_iter = _client.list_ticker_news(
-            ticker=ticker.upper(),
+            ticker=ticker,
             limit=limit,
             order="desc",
             sort="published_utc"
@@ -365,7 +346,7 @@ def get_news(symbol: str, limit: int = 15) -> dict:
     print(f"DEBUG [Massive]: Returning {len(all_headlines)} total headlines for {symbol}")
 
     return {
-        "symbol": symbol.upper(),
+        "symbol": symbol,
         "headlines": all_headlines
     }
 
@@ -491,7 +472,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
     try:
         # First, get the underlying stock's current price from daily snapshot
         print(f"DEBUG [Massive]: Fetching options chain for {symbol}...")
-        underlying_snapshot = get_daily_snapshot(symbol.upper())
+        underlying_snapshot = get_daily_snapshot(symbol)
         underlying_price = underlying_snapshot.get("current_price", 0.0) if underlying_snapshot else 0.0
         print(f"DEBUG [Massive]: Underlying price for {symbol}: ${underlying_price:.2f}")
 
@@ -501,7 +482,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
 
         # Get the options chain snapshot
         # This returns an iterator of OptionContractSnapshot objects
-        chain_iter = _client.list_snapshot_options_chain(symbol.upper())
+        chain_iter = _client.list_snapshot_options_chain(symbol)
 
         # Collect all option contracts
         all_contracts = []
@@ -634,7 +615,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
 
         if not all_contracts:
             return {
-                "symbol": symbol.upper(),
+                "symbol": symbol,
                 "underlying_price": underlying_price,
                 "expirations": [],
                 "strikes": [],
@@ -706,7 +687,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
         print(f"DEBUG [Massive]: Options chain for {symbol} - {len(expirations_with_data)} expirations, {len(strikes)} strikes, {len(all_contracts)} valid contracts from {contract_count} total processed")
 
         return {
-            "symbol": symbol.upper(),
+            "symbol": symbol,
             "underlying_price": underlying_price,
             "expirations": expirations_with_data,  # Only expirations with data
             "strikes": strikes,
@@ -721,7 +702,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
         # Check for authorization error
         if "NOT_AUTHORIZED" in error_msg or "not entitled" in error_msg.lower():
             return {
-                "symbol": symbol.upper(),
+                "symbol": symbol,
                 "underlying_price": 0,
                 "expirations": [],
                 "strikes": [],
@@ -731,7 +712,7 @@ def get_options_chain(symbol: str, max_strikes: int = 30, max_contracts: int = 2
             }
 
         return {
-            "symbol": symbol.upper(),
+            "symbol": symbol,
             "underlying_price": 0,
             "expirations": [],
             "strikes": [],
