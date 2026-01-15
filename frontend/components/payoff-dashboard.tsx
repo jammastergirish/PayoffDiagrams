@@ -619,8 +619,8 @@ export function PayoffDashboard() {
     // Capture current values to avoid closure issues
     const currentHeadlines = marketNewsHeadlines.slice(0, 10);
     
-    // Create a fingerprint of current headlines to detect changes
-    const headlinesFingerprint = currentHeadlines.map(h => h.articleId).join(",");
+    // Create a fingerprint of current headlines to detect changes (include headline text for content changes)
+    const headlinesFingerprint = currentHeadlines.map(h => `${h.articleId}:${h.headline}`).join("|");
     if (headlinesFingerprint === lastMarketAnalysisRef.current) return;
     lastMarketAnalysisRef.current = headlinesFingerprint;
     
@@ -680,8 +680,8 @@ export function PayoffDashboard() {
     const currentTicker = selectedTicker;
     const currentHeadlines = newsHeadlines.slice(0, 10);
     
-    // Create a fingerprint of current ticker + headlines to detect changes
-    const fingerprint = `${currentTicker}:${currentHeadlines.map(h => h.articleId).join(",")}`;
+    // Create a fingerprint of current ticker + headlines to detect changes (include headline text)
+    const fingerprint = `${currentTicker}:${currentHeadlines.map(h => `${h.articleId}:${h.headline}`).join("|")}`;
     if (fingerprint === lastTickerAnalysisRef.current) return;
     lastTickerAnalysisRef.current = fingerprint;
     
