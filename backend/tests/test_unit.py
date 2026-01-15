@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from backend.ib_client import IBClient
+from backend.brokers.ibkr import IBClient
 
 # Mock ib_insync classes
 class MockContract:
@@ -37,7 +37,7 @@ class MockPortfolioItem:
 
 @pytest.fixture
 def mock_ib():
-    with patch('backend.ib_client.IB') as MockIB:
+    with patch('backend.brokers.ibkr.IB') as MockIB:
         ib_instance = MockIB.return_value
         ib_instance.isConnected.return_value = True
         yield ib_instance

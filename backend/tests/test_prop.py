@@ -1,5 +1,5 @@
 from hypothesis import given, strategies as st
-from backend.ib_client import PositionModel
+from backend.brokers.ibkr import PositionModel
 
 # Strategies for generating random position data
 ticker_st = st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=('Lu', 'Ll', 'Nd')))

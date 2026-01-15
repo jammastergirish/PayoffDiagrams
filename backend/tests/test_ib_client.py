@@ -10,7 +10,7 @@ Tests cover:
 import pytest
 import math
 from unittest.mock import MagicMock, patch
-from backend.ib_client import IBClient, PositionModel
+from backend.brokers.ibkr import IBClient, PositionModel
 
 
 class TestSafeFloat:

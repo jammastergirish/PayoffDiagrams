@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from .ib_client import ib_client, PositionModel
-from .massive_client import get_historical_bars, get_news, get_market_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot, get_options_chain as massive_get_options_chain
+from .brokers.ibkr import ib_client, PositionModel
+from .providers.massive import get_historical_bars, get_news, get_market_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot, get_options_chain as massive_get_options_chain
 from .llm_client import analyze_market_news, analyze_ticker_news
 import asyncio
 import json

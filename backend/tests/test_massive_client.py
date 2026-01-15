@@ -90,7 +90,7 @@ class TestGetHistoricalBars:
     """Tests for get_historical_bars function."""
     
     def test_returns_bars_for_valid_symbol(self, mock_massive_client):
-        from backend.massive_client import get_historical_bars
+        from backend.providers.massive import get_historical_bars
         
         # Setup mock data
         now = datetime.now()
@@ -113,7 +113,7 @@ class TestGetHistoricalBars:
         assert result["bars"][1]["close"] == 108
     
     def test_handles_empty_response(self, mock_massive_client):
-        from backend.massive_client import get_historical_bars
+        from backend.providers.massive import get_historical_bars
         
         mock_massive_client.get_aggs.return_value = []
         
@@ -124,7 +124,7 @@ class TestGetHistoricalBars:
         assert "error" not in result
     
     def test_handles_api_error(self, mock_massive_client):
-        from backend.massive_client import get_historical_bars
+        from backend.providers.massive import get_historical_bars
         
         mock_massive_client.get_aggs.side_effect = Exception("API Error")
         
@@ -136,7 +136,7 @@ class TestGetHistoricalBars:
         assert "API Error" in result["error"]
     
     def test_uses_correct_timeframe_config(self, mock_massive_client):
-        from backend.massive_client import get_historical_bars
+        from backend.providers.massive import get_historical_bars
         
         mock_massive_client.get_aggs.return_value = []
         
@@ -151,7 +151,7 @@ class TestGetDailySnapshot:
     """Tests for get_daily_snapshot function."""
     
     def test_returns_price_and_change(self, mock_massive_client):
-        from backend.massive_client import get_daily_snapshot
+        from backend.providers.massive import get_daily_snapshot
         
         now = datetime.now()
         ts_today = int(now.timestamp() * 1000)
@@ -172,7 +172,7 @@ class TestGetDailySnapshot:
         assert result["change_pct"] == 5.0
     
     def test_handles_negative_change(self, mock_massive_client):
-        from backend.massive_client import get_daily_snapshot
+        from backend.providers.massive import get_daily_snapshot
         
         now = datetime.now()
         ts = int(now.timestamp() * 1000)
@@ -189,7 +189,7 @@ class TestGetDailySnapshot:
         assert result["change_pct"] == -5.0
     
     def test_handles_no_data(self, mock_massive_client):
-        from backend.massive_client import get_daily_snapshot
+        from backend.providers.massive import get_daily_snapshot
         
         mock_massive_client.get_aggs.return_value = []
         
@@ -202,7 +202,7 @@ class TestGetTickerDetails:
     """Tests for get_ticker_details function."""
     
     def test_returns_company_info(self, mock_massive_client):
-        from backend.massive_client import get_ticker_details
+        from backend.providers.massive import get_ticker_details
         
         mock_details = MockTickerDetails("Apple Inc.", "Technology company")
         mock_details.branding = MockBranding()
@@ -217,7 +217,7 @@ class TestGetTickerDetails:
         assert "apiKey" in result["branding"]["logo_url"]
     
     def test_handles_missing_branding(self, mock_massive_client):
-        from backend.massive_client import get_ticker_details
+        from backend.providers.massive import get_ticker_details
         
         mock_details = MockTickerDetails("Test Corp")
         mock_details.branding = None
@@ -229,7 +229,7 @@ class TestGetTickerDetails:
         assert result["branding"] is None
     
     def test_handles_api_error(self, mock_massive_client):
-        from backend.massive_client import get_ticker_details
+        from backend.providers.massive import get_ticker_details
         
         mock_massive_client.get_ticker_details.side_effect = Exception("Not found")
         
@@ -242,7 +242,7 @@ class TestGetNews:
     """Tests for get_news function."""
     
     def test_merges_benzinga_and_reference_news(self, mock_massive_client):
-        from backend.massive_client import get_news
+        from backend.providers.massive import get_news
         
         # Setup Benzinga mock
         benzinga_articles = [
@@ -265,7 +265,7 @@ class TestGetNews:
         assert any(h["providerCode"] == "BZ" for h in result["headlines"])
     
     def test_respects_limit(self, mock_massive_client):
-        from backend.massive_client import get_news
+        from backend.providers.massive import get_news
         
         # Setup many articles
         benzinga_articles = [
@@ -284,7 +284,7 @@ class TestNewsHelperFunctions:
     """Tests for internal news helper functions."""
     
     def test_parse_benzinga_article_extracts_fields(self):
-        from backend.massive_client import _parse_benzinga_article
+        from backend.providers.massive import _parse_benzinga_article
         
         article = MockNewsArticle(
             benzinga_id="12345",
@@ -309,7 +309,7 @@ class TestNewsHelperFunctions:
         assert result["imageUrl"] == "https://cdn.benzinga.com/image1.jpg"  # First image
     
     def test_parse_benzinga_article_handles_no_images(self):
-        from backend.massive_client import _parse_benzinga_article
+        from backend.providers.massive import _parse_benzinga_article
         
         article = MockNewsArticle("12345", "Title", "2026-01-14T10:00:00Z")
         # No images attribute
@@ -319,7 +319,7 @@ class TestNewsHelperFunctions:
         assert result["imageUrl"] is None
     
     def test_parse_reference_article_extracts_fields(self):
-        from backend.massive_client import _parse_reference_article
+        from backend.providers.massive import _parse_reference_article
         
         article = MockRefNewsArticle(
             article_id="abc123",
@@ -340,7 +340,7 @@ class TestNewsHelperFunctions:
         assert result["imageUrl"] == "https://example.com/image.jpg"
     
     def test_parse_reference_article_creates_provider_code(self):
-        from backend.massive_client import _parse_reference_article
+        from backend.providers.massive import _parse_reference_article
         
         article = MockRefNewsArticle("id1", "Title", "2026-01-14T10:00:00Z")
         article.publisher.name = "Investing.com"
@@ -355,7 +355,7 @@ class TestGetMarketNews:
     """Tests for get_market_news function."""
     
     def test_fetches_news_from_multiple_tickers(self, mock_massive_client):
-        from backend.massive_client import get_market_news
+        from backend.providers.massive import get_market_news
         
         # Setup Benzinga mock
         benzinga_articles = [
@@ -372,7 +372,7 @@ class TestGetMarketNews:
         assert "headlines" in result
     
     def test_deduplicates_headlines(self, mock_massive_client):
-        from backend.massive_client import get_market_news
+        from backend.providers.massive import get_market_news
         
         # Same headline from different tickers (market-wide news)
         benzinga_articles = [
@@ -390,7 +390,7 @@ class TestGetMarketNews:
         assert len(unique_headlines) == len(result["headlines"])
     
     def test_respects_limit(self, mock_massive_client):
-        from backend.massive_client import get_market_news
+        from backend.providers.massive import get_market_news
         
         # Many articles
         benzinga_articles = [
@@ -406,7 +406,7 @@ class TestGetMarketNews:
     
     def test_returns_empty_when_no_client(self):
         """Test that function handles missing API client gracefully."""
-        from backend.massive_client import get_market_news
+        from backend.providers.massive import get_market_news
         
         with patch('backend.massive_client._client', None):
             result = get_market_news(limit=10)
