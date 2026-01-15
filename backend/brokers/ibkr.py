@@ -70,6 +70,7 @@ class IBClient:
         self._account_summary_started = False
         # P&L subscriptions - reqPnL returns live-updated PnL objects
         self.pnl_subscriptions = {}  # account -> PnL object
+        self.prior_close_cache = {}  # conId -> prior close price (persists between polls)
 
     def start_loop(self):
         """Runs the IB event loop in a separate thread."""
@@ -212,6 +213,12 @@ class IBClient:
                     print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType}")
                     current_price = safe_float(ticker.marketPrice()) or safe_float(ticker.last) or safe_float(ticker.close) or 0.0
                     prior_close = safe_float(ticker.close)
+                    # Cache prior_close ONCE - don't overwrite (IBKR sometimes returns current price as "close")
+                    # Also only cache if it differs from current price (valid prior close should be different)
+                    if prior_close > 0 and contract.conId not in self.prior_close_cache:
+                        # Only cache if prior_close differs from current (by at least 0.1%)
+                        if current_price > 0 and abs(prior_close - current_price) / current_price > 0.001:
+                            self.prior_close_cache[contract.conId] = prior_close
 
                     # Greeks extraction
                     # IBKR provides Greeks in standard format:
@@ -229,6 +236,9 @@ class IBClient:
                         und_price = safe_float(ticker.modelGreeks.undPrice)
                 else:
                     print(f"DEBUG: Processing {contract.symbol} | SecType: {contract.secType} (no ticker data yet)")
+                    # Try to use cached prior_close if available
+                    if contract.conId in self.prior_close_cache:
+                        prior_close = self.prior_close_cache[contract.conId]
 
                 # Fallback for underlying price from live stock ticker if option
                 # If it's an option, we need the underlying price for the diagram
@@ -267,6 +277,36 @@ class IBClient:
                     pos_daily_pnl = (current_price - prior_close) * safe_float(pos.position) * multiplier
 
                 if contract.secType == 'STK':
+                    # Get data from portfolio first - unrealized P&L and marketPrice
+                    stock_pnl = 0.0
+                    portfolio_market_price = 0.0
+                    found_in_portfolio = False
+                    for item in portfolio:
+                        if item.contract.conId == contract.conId and item.account == pos.account:
+                            stock_pnl = item.unrealizedPNL
+                            portfolio_market_price = safe_float(item.marketPrice)
+                            found_in_portfolio = True
+                            print(f"DEBUG STK: {contract.symbol} found in portfolio, unrealizedPNL={stock_pnl}, marketPrice={portfolio_market_price}")
+                            break
+                    
+                    # Use portfolio marketPrice as fallback when ticker data unavailable
+                    if current_price == 0 and portfolio_market_price > 0:
+                        current_price = portfolio_market_price
+                    
+                    # Recalculate daily P&L with updated current_price and cached prior_close
+                    pos_daily_pnl = 0.0
+                    if current_price > 0 and prior_close > 0:
+                        pos_daily_pnl = (current_price - prior_close) * safe_float(pos.position)
+                    
+                    # Fallback to local unrealized calculation if portfolio data not available
+                    if not found_in_portfolio:
+                        print(f"DEBUG STK: {contract.symbol} NOT found in portfolio, conId={contract.conId}")
+                        if current_price > 0:
+                            stock_pnl = (current_price - safe_float(pos.avgCost)) * safe_float(pos.position)
+                            print(f"DEBUG STK: {contract.symbol} fallback calc: ({current_price} - {pos.avgCost}) * {pos.position} = {stock_pnl}")
+                    
+                    print(f"DEBUG STK OUTPUT: {contract.symbol} unrealized_pnl={stock_pnl}, daily_pnl={pos_daily_pnl}, current_price={current_price}, prior_close={prior_close}")
+                    
                     mapped_positions.append({
                         "ticker": contract.symbol,
                         "account": pos.account,
@@ -274,7 +314,7 @@ class IBClient:
                         "qty": safe_float(pos.position),
                         "cost_basis": safe_float(pos.avgCost),
                         "current_price": current_price,
-                        "unrealized_pnl": (current_price - safe_float(pos.avgCost)) * safe_float(pos.position) if current_price else 0.0,
+                        "unrealized_pnl": safe_float(stock_pnl),
                         "daily_pnl": pos_daily_pnl,
                         "delta": 1.0,
                         "gamma": 0.0, "theta": 0.0, "vega": 0.0, "iv": 0.0
@@ -293,13 +333,24 @@ class IBClient:
                     # PnL from portfolio is often delayed/static compared to live calc
                     # but let's prefer portfolio PnL if available as it matches account window
                     pnl = 0.0
+                    portfolio_market_price = 0.0
                     found_in_portfolio = False
                     for item in portfolio:
                         # Match by conId AND Account
                         if item.contract.conId == contract.conId and item.account == pos.account:
                             pnl = item.unrealizedPNL
+                            portfolio_market_price = safe_float(item.marketPrice)
                             found_in_portfolio = True
                             break
+
+                    # Use portfolio marketPrice as fallback when ticker data unavailable
+                    if current_price == 0 and portfolio_market_price > 0:
+                        current_price = portfolio_market_price
+
+                    # Recalculate daily P&L with updated current_price and cached prior_close
+                    pos_daily_pnl = 0.0
+                    if current_price > 0 and prior_close > 0:
+                        pos_daily_pnl = (current_price - prior_close) * safe_float(pos.position) * 100.0
 
                     # Fallback live P&L calculation if portfolio data missing/zero but we have live prices
                     # Some portfolio items might be missing or zero if not subscribed
@@ -314,7 +365,7 @@ class IBClient:
                     avg_cost_per_share = safe_float(pos.avgCost)
                     cost_basis_per_contract = avg_cost_per_share / 100.0 if avg_cost_per_share else 0.0
 
-                    print(f"DEBUG OPT: {contract.symbol} {contract.right}{contract.strike} exp={expiry_formatted} qty={pos.position} avgCost={pos.avgCost} cost_basis={cost_basis_per_contract} und_price={und_price} strike={contract.strike}")
+                    print(f"DEBUG OPT: {contract.symbol} {contract.right}{contract.strike} exp={expiry_formatted} qty={pos.position} unrealized_pnl={pnl} daily_pnl={pos_daily_pnl} current_price={current_price} prior_close={prior_close}")
 
                     mapped_positions.append({
                         "ticker": contract.symbol,

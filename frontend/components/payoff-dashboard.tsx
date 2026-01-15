@@ -177,6 +177,30 @@ export function PayoffDashboard() {
   // Privacy Mode - hide absolute dollar values
   const [privacyMode, setPrivacyMode] = useState(false);
   
+  // Helper to refresh portfolio data (called after trades to get updated positions/P&L)
+  const refreshPortfolio = async () => {
+    try {
+      const data = await fetchLivePortfolio();
+      setPositions(data.positions);
+      if (data.accounts) setAccounts(data.accounts);
+      if (data.summary) setAccountSummaries(data.summary);
+      // Apply live prices from refreshed positions
+      const livePrices: Record<string, number> = {};
+      data.positions.forEach(p => {
+        if (!p.ticker) return;
+        let price = 0;
+        if (p.position_type === "stock" && p.current_price) {
+          price = p.current_price;
+        } else if (p.position_type !== "stock" && p.underlying_price) {
+          price = p.underlying_price;
+        }
+        if (price > 0) livePrices[p.ticker] = price;
+      });
+      setStockPrices(prev => ({ ...prev, ...livePrices }));
+    } catch (e) {
+      console.error("Failed to refresh portfolio:", e);
+    }
+  };
   
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
@@ -2304,6 +2328,8 @@ export function PayoffDashboard() {
                               const result = await placeTrade(order);
                               if (result.success) {
                                 showToast(`✓ ${tradeAction} ${tradeQuantity} ${selectedTicker} - Order #${result.order_id}`, "success");
+                                // Wait for IBKR to settle, then refresh portfolio
+                                setTimeout(() => refreshPortfolio(), 2500);
                               } else {
                                 showToast(`✗ Order failed: ${result.error}`, "error");
                               }
@@ -2749,6 +2775,8 @@ export function PayoffDashboard() {
                               if (result.success) {
                                 showToast(`Order placed! ${result.message}`, "success");
                                 setSelectedLegs([]);
+                                // Wait for IBKR to settle, then refresh portfolio
+                                setTimeout(() => refreshPortfolio(), 2500);
                               } else {
                                 showToast(`Order failed: ${result.error}`, "error");
                               }
