@@ -33,14 +33,23 @@ npm install > /dev/null 2>&1 # Ensure deps are installed
 if command -v ngrok >/dev/null 2>&1; then
   NGROK_DOMAIN=${NGROK_DOMAIN:-${NGROK_URL:-ag-tradeshape.ngrok.io}}
   NGROK_PORT=${NGROK_PORT:-3000}
-  if [ -z "$NGROK_BASIC_AUTH_GIRISH" ] || [ -z "$NGROK_BASIC_AUTH_ALEXANDRA" ]; then
-    echo "ngrok auth not set; skipping tunnel."
+  if [ -n "$NGROK_OAUTH_PROVIDER" ]; then
+    if [ -z "$NGROK_OAUTH_ALLOW_EMAILS" ]; then
+      echo "ngrok oauth allow list not set; skipping tunnel."
+    else
+      echo "Starting ngrok tunnel..."
+      ngrok_args=(http --domain="$NGROK_DOMAIN" "$NGROK_PORT" --oauth="$NGROK_OAUTH_PROVIDER")
+      IFS=',' read -r -a ngrok_emails <<< "$NGROK_OAUTH_ALLOW_EMAILS"
+      for email in "${ngrok_emails[@]}"; do
+        email=$(echo "$email" | xargs)
+        if [ -n "$email" ]; then
+          ngrok_args+=(--oauth-allow-email "$email")
+        fi
+      done
+      ngrok "${ngrok_args[@]}" > /dev/null 2>&1 &
+    fi
   else
-    echo "Starting ngrok tunnel..."
-    ngrok http --domain="$NGROK_DOMAIN" \
-      --basic-auth "$NGROK_BASIC_AUTH_GIRISH" \
-      --basic-auth "$NGROK_BASIC_AUTH_ALEXANDRA" \
-      "$NGROK_PORT" > /dev/null 2>&1 &
+    echo "ngrok oauth not set; skipping tunnel."
   fi
 else
   echo "ngrok not found; skipping tunnel."
