@@ -1290,21 +1290,15 @@ export function PayoffDashboard() {
         </div>
         
         <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:items-center gap-2 sm:gap-3">
-          {/* YTD % Return - calculated first for positioning */}
+          {/* Net Liq and Today metrics */}
           {accountSummaries && (() => {
             const totalNetLiq = selectedAccount !== 'All' && accountSummaries[selectedAccount]
               ? accountSummaries[selectedAccount].net_liquidation
               : Object.values(accountSummaries).reduce((sum, s) => sum + s.net_liquidation, 0);
-            const totalRealizedPnl = selectedAccount !== 'All' && accountSummaries[selectedAccount]
-              ? accountSummaries[selectedAccount].realized_pnl
-              : Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0);
-            const costBasis = totalNetLiq - portfolioUnrealizedPnl;
-            const totalGain = totalRealizedPnl + portfolioUnrealizedPnl;
-            const ytdPct = costBasis > 0 ? (totalGain / costBasis) * 100 : 0;
             
             return (
               <>
-                {/* Net Liq - first */}
+                {/* Net Liq */}
                 {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Net Liq</div>
@@ -1321,15 +1315,7 @@ export function PayoffDashboard() {
                   </div>
                 )}
                 
-                {/* YTD % - second */}
-                <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
-                  <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">YTD %</div>
-                  <div className={`text-lg font-bold ${ytdPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {ytdPct >= 0 ? '+' : ''}{ytdPct.toFixed(1)}%
-                  </div>
-                </div>
-                
-                {/* Today - third */}
+                {/* Today */}
                 {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
@@ -1342,23 +1328,6 @@ export function PayoffDashboard() {
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatPrivateCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0), privacyMode)}
-                    </div>
-                  </div>
-                )}
-                
-                {/* Realized - fourth */}
-                {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
-                    <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
-                    <div className={`text-lg font-bold ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].realized_pnl, privacyMode)}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
-                    <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
-                    <div className={`text-lg font-bold ${totalRealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {totalRealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(totalRealizedPnl, privacyMode)}
                     </div>
                   </div>
                 )}
@@ -2151,8 +2120,8 @@ export function PayoffDashboard() {
                           {selectedTicker && currentPrice > 0 && (
                             <div className="space-y-3">
                               <div className="text-sm text-gray-500 uppercase tracking-wider">Quick Trade (Market Order)</div>
-                              <div className="grid grid-cols-3 gap-2">
-                                {[10000, 50000, 100000].map((amount) => {
+                              <div className="grid grid-cols-5 gap-2">
+                                {[5000, 10000, 25000, 50000, 100000].map((amount) => {
                                   const qty = Math.floor(amount / currentPrice);
                                   return qty > 0 ? (
                                     <div key={amount} className="space-y-1">
