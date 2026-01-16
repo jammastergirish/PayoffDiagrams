@@ -3,6 +3,7 @@
 from typing import Optional
 from .base import DataProviderInterface
 from .massive import MassiveProvider
+from .ibkr import IBKRProvider
 
 
 class DataProviderFactory:
@@ -10,6 +11,7 @@ class DataProviderFactory:
 
     _providers = {
         "massive": MassiveProvider,
+        "ibkr": IBKRProvider,
         # Future providers can be added here:
         # "polygon": PolygonProvider,
         # "alpha_vantage": AlphaVantageProvider,
