@@ -1,8 +1,9 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .brokers.ibkr import ib_client, PositionModel
-from .providers.massive import get_historical_bars, get_news, get_market_news, get_news_article as massive_get_article, get_ticker_details, get_daily_snapshot, get_options_chain as massive_get_options_chain
+from .providers.factory import DataProviderFactory
 from .llm_client import analyze_market_news, analyze_ticker_news
 from .common.utils import validate_symbol, format_error_response
 from .common.cache import options_cache, historical_cache, snapshot_cache
@@ -14,6 +15,37 @@ from typing import Dict, Any
 
 from contextlib import asynccontextmanager
 import nest_asyncio
+
+# ============================================
+# PROVIDER CONFIGURATION
+# ============================================
+# DATA_PROVIDER: For historical bars, snapshots, options chain, ticker details
+#   Options: 'massive' (default), 'ibkr'
+# NEWS_PROVIDER: For news headlines and articles (separate from data)
+#   Options: 'massive' (default - Benzinga), 'ibkr' (requires subscription)
+# BROKERAGE_PROVIDER: For positions, P&L, order placement
+#   Options: 'ibkr' (default, only option currently)
+# ============================================
+
+DATA_PROVIDER = os.getenv("DATA_PROVIDER", "massive").lower()
+NEWS_PROVIDER = os.getenv("NEWS_PROVIDER", "massive").lower()  # Separate for news
+BROKERAGE_PROVIDER = os.getenv("BROKERAGE_PROVIDER", "ibkr").lower()
+
+# Create data provider
+data_provider = DataProviderFactory.create(DATA_PROVIDER)
+if data_provider is None:
+    print(f"WARNING: Unknown DATA_PROVIDER '{DATA_PROVIDER}', falling back to 'massive'")
+    DATA_PROVIDER = "massive"
+    data_provider = DataProviderFactory.create("massive")
+
+# Create separate news provider (allows mixing e.g., IBKR data + Massive news)
+news_provider = DataProviderFactory.create(NEWS_PROVIDER)
+if news_provider is None:
+    print(f"WARNING: Unknown NEWS_PROVIDER '{NEWS_PROVIDER}', falling back to 'massive'")
+    NEWS_PROVIDER = "massive"
+    news_provider = DataProviderFactory.create("massive")
+
+print(f"Providers: data={DATA_PROVIDER}, news={NEWS_PROVIDER}, brokerage={BROKERAGE_PROVIDER}")
 
 # Patch asyncio to allow nested event loops (required for ib_insync + uvicorn)
 nest_asyncio.apply()
@@ -41,7 +73,12 @@ app.add_middleware(
 def health():
     return {
         "status": "ok", 
-        "ib_connected": ib_client.ib.isConnected()
+        "ib_connected": ib_client.ib.isConnected(),
+        "providers": {
+            "data": DATA_PROVIDER,
+            "news": NEWS_PROVIDER,
+            "brokerage": BROKERAGE_PROVIDER
+        }
     }
 
 # ============================================
@@ -145,9 +182,7 @@ def place_options_trade(order: OptionsTradeOrder):
 @app.get("/api/options-chain/{symbol}")
 def get_options_chain_endpoint(symbol: str, max_strikes: int = 30, force_refresh: bool = False):
     """
-    Get options chain for a symbol from Massive.com with caching.
-
-    Note: Requires Massive.com Options subscription.
+    Get options chain for a symbol with caching.
 
     Args:
         symbol: Stock ticker (e.g., AAPL)
@@ -166,27 +201,25 @@ def get_options_chain_endpoint(symbol: str, max_strikes: int = 30, force_refresh
         if cached_result:
             return {**cached_result["data"], **cached_result}
 
-    # Fetch fresh data
-    data = massive_get_options_chain(symbol_validated, max_strikes)
+    # Fetch fresh data from configured provider
+    data = data_provider.get_options_chain(symbol_validated, max_strikes)
 
     # Cache the result if successful
     if not data.get("error"):
         options_cache.set(cache_key, data)
 
-    return {**data, "cached": False}
+    return {**data, "cached": False, "provider": DATA_PROVIDER}
 
 
 # ============================================
-# MASSIVE.COM ENDPOINTS (Historical + News + Company Info)
-# - Historical OHLC bars
-# - Benzinga news headlines and articles
-# - Ticker details (company info, branding)
+# DATA PROVIDER ENDPOINTS (Historical + News + Company Info)
+# Uses DATA_PROVIDER env var to select provider (massive or ibkr)
 # ============================================
 
 @app.get("/api/historical/{symbol}")
 def get_historical_data(symbol: str, timeframe: str = "1M"):
     """
-    Get historical price data for a symbol from Massive.com with smart caching.
+    Get historical price data for a symbol with smart caching.
 
     Args:
         symbol: Stock ticker (e.g., AAPL)
@@ -206,31 +239,39 @@ def get_historical_data(symbol: str, timeframe: str = "1M"):
     if cached_result:
         return {**cached_result["data"], **cached_result}
 
-    # Fetch fresh data
-    data = get_historical_bars(validate_symbol(symbol), timeframe.upper())
+    # Fetch fresh data from configured provider
+    bars = data_provider.get_historical_data(validate_symbol(symbol), timeframe.upper())
+    
+    # Convert HistoricalBar objects to dicts for JSON serialization
+    data = {
+        "symbol": validate_symbol(symbol),
+        "timeframe": timeframe.upper(),
+        "bars": [bar.to_dict() if hasattr(bar, 'to_dict') else bar for bar in bars] if bars else []
+    }
 
     # Cache if successful
-    if not data.get("error"):
+    if data["bars"]:
         historical_cache.set(cache_key, data)
 
-    return data
+    return {**data, "provider": DATA_PROVIDER}
 
 
 @app.get("/api/ticker/{symbol}")
 def get_ticker_info(symbol: str):
     """
-    Get ticker details (company name, description, logo) from Massive.com.
+    Get ticker details (company name, description, logo).
     
     Args:
         symbol: Stock ticker (e.g., AAPL)
     """
-    return get_ticker_details(validate_symbol(symbol))
+    result = data_provider.get_ticker_details(validate_symbol(symbol))
+    return {**result, "provider": DATA_PROVIDER}
 
 
 @app.get("/api/snapshot/{symbol}")
 def get_price_snapshot(symbol: str, force_refresh: bool = False):
     """
-    Get current price and daily change for a symbol from Massive.com with smart caching.
+    Get current price and daily change for a symbol with smart caching.
 
     Args:
         symbol: Stock ticker (e.g., AAPL)
@@ -245,48 +286,51 @@ def get_price_snapshot(symbol: str, force_refresh: bool = False):
         if cached_result:
             return {**cached_result["data"], **cached_result}
 
-    # Fetch fresh data
-    data = get_daily_snapshot(validate_symbol(symbol))
+    # Fetch fresh data from configured provider
+    data = data_provider.get_daily_snapshot(validate_symbol(symbol))
 
     # Cache if successful
     if data and not data.get("error"):
         snapshot_cache.set(cache_key, data)
 
-    return data
+    return {**data, "provider": DATA_PROVIDER}
 
 
 @app.get("/api/news/market")
 def get_market_news_headlines(limit: int = 25):
     """
-    Get general market news from Massive.com across major indices.
+    Get general market news across major indices.
     
     Args:
         limit: Max number of headlines (1-50, default 25)
     """
-    return get_market_news(limit)
+    headlines = news_provider.get_market_news(limit)
+    return {"headlines": headlines, "provider": NEWS_PROVIDER}
 
 
 @app.get("/api/news/{symbol}")
 def get_news_headlines(symbol: str, limit: int = 15):
     """
-    Get news headlines for a symbol from Massive.com Benzinga API.
+    Get news headlines for a symbol.
     
     Args:
         symbol: Stock ticker (e.g., AAPL)
         limit: Max number of headlines (1-100, default 15)
     """
-    return get_news(validate_symbol(symbol), limit)
+    headlines = news_provider.get_news(validate_symbol(symbol), limit)
+    return {"symbol": validate_symbol(symbol), "headlines": headlines, "provider": NEWS_PROVIDER}
 
 
 @app.get("/api/news/article/{article_id}")
 def get_article(article_id: str):
     """
-    Get full article content from Benzinga.
+    Get full article content.
     
     Args:
-        article_id: The benzinga_id of the article
+        article_id: The article ID
     """
-    return massive_get_article(article_id)
+    result = news_provider.get_news_article(article_id)
+    return {**result, "provider": NEWS_PROVIDER}
 
 
 # ============================================
