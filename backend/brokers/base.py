@@ -44,6 +44,24 @@ class BrokerInterface(ABC):
         pass
 
     @abstractmethod
+    def place_multileg_option_order(self, legs: List[Dict[str, Any]], order_type: str = "MARKET", limit_price: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Place a multi-leg options order.
+        
+        Args:
+            legs: List of leg dicts with keys:
+                - symbol: Underlying symbol
+                - expiry: Expiration date
+                - strike: Strike price
+                - right: "C" or "P"
+                - action: "BUY" or "SELL"
+                - quantity: Number of contracts
+            order_type: "MARKET" or "LIMIT"
+            limit_price: Required for LIMIT orders
+        """
+        pass
+
+    @abstractmethod
     def get_option_chain(self, symbol: str, max_strikes: int = 30) -> Dict[str, Any]:
         """Get options chain for a symbol."""
         pass

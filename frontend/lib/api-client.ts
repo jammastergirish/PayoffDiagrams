@@ -52,7 +52,18 @@ async function apiRequest<T>(
     }
 }
 
-export async function checkBackendHealth(): Promise<{ status: string; ib_connected: boolean } | null> {
+export async function checkBackendHealth(): Promise<{ 
+    status: string; 
+    broker_connected: boolean;
+    ib_connected: boolean;
+    data_connected: boolean;
+    news_connected: boolean;
+    providers: {
+        data: string;
+        news: string;
+        brokerage: string;
+    }
+} | null> {
     return apiRequest('/api/health', undefined, null);
 }
 

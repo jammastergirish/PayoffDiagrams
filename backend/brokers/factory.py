@@ -3,6 +3,7 @@
 from typing import Optional
 from .base import BrokerInterface
 from .ibkr import IBKRBroker
+from .alpaca import AlpacaBroker
 
 
 class BrokerFactory:
@@ -11,8 +12,8 @@ class BrokerFactory:
     _brokers = {
         "ibkr": IBKRBroker,
         "interactive_brokers": IBKRBroker,
+        "alpaca": AlpacaBroker,
         # Future brokers can be added here:
-        # "alpaca": AlpacaBroker,
         # "schwab": SchwabBroker,
         # "etrade": ETradeBroker,
     }

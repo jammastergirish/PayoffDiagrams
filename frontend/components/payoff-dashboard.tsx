@@ -101,7 +101,10 @@ export function PayoffDashboard() {
   // Live Mode State
   const [isLiveMode, setIsLiveMode] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'offline'>('checking');
-  const [ibConnected, setIbConnected] = useState(false);
+  const [ibConnected, setIbConnected] = useState(false); // Broker connection
+  const [dataConnected, setDataConnected] = useState(false);
+  const [newsConnected, setNewsConnected] = useState(false);
+  const [providers, setProviders] = useState<{data: string; news: string; brokerage: string} | null>(null);
   
   // Toggles
   const [showStock, setShowStock] = useState(false);
@@ -810,9 +813,12 @@ export function PayoffDashboard() {
       if (health && health.status === "ok") {
         setIsLiveMode(true);
         setBackendStatus("connected");
-        setIbConnected(health.ib_connected);
+        setIbConnected(health.broker_connected);
+        setDataConnected(health.data_connected);
+        setNewsConnected(health.news_connected);
+        setProviders(health.providers);
 
-        if (health.ib_connected) {
+        if (health.broker_connected) {
           startLoadTask("portfolio");
           let data: Awaited<ReturnType<typeof fetchLivePortfolio>>;
           try {
@@ -1228,11 +1234,35 @@ export function PayoffDashboard() {
 
 
        {isLiveMode && (
-           <div className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 p-3 rounded-lg text-sm border ${ibConnected ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
-               <div className="flex items-center gap-2">
-                 <div className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${ibConnected ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                 <span className="text-xs sm:text-sm">{ibConnected ? "IBKR Connected" : "Waiting for TWS..."}</span>
-               </div>
+           <div className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 p-3 rounded-lg text-sm border bg-slate-900/50 border-white/10`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400 text-xs uppercase tracking-wider">Brokerage:</span>
+                  <div className="flex items-center gap-2">
+                     <span className="font-medium text-white uppercase">{providers?.brokerage || 'Unknown'}</span>
+                     <div className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${ibConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  </div>
+                </div>
+
+                <div className="hidden sm:block w-px h-4 bg-white/10 mx-2"></div>
+
+                <div className="flex items-center gap-2">
+                   <span className="text-gray-400 text-xs uppercase tracking-wider">Data:</span>
+                   <div className="flex items-center gap-2">
+                      <span className="font-medium text-white uppercase">{providers?.data || 'Unknown'}</span>
+                      <div className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${dataConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                   </div>
+                </div>
+
+                <div className="hidden sm:block w-px h-4 bg-white/10 mx-2"></div>
+
+                <div className="flex items-center gap-2">
+                   <span className="text-gray-400 text-xs uppercase tracking-wider">News:</span>
+                   <div className="flex items-center gap-2">
+                      <span className="font-medium text-white uppercase">{providers?.news || 'Unknown'}</span>
+                      <div className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${newsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                   </div>
+                </div>
+                
                 <div className="flex items-center gap-2 sm:gap-4 sm:ml-auto flex-wrap">
                    {/* Account Selector */}
                    {accounts.length > 0 && (
@@ -1252,7 +1282,7 @@ export function PayoffDashboard() {
                        </div>
                    )}
                    <span className="text-xs font-mono opacity-70 hidden sm:inline border-l border-white/10 pl-4">
-                       {ibConnected ? "CONNECTED" : "Loc: 8000 OK / TWS: --"}
+                       {ibConnected ? "CONNECTED" : "DISCONNECTED"}
                    </span>
                 </div>
            </div>
@@ -1314,15 +1344,21 @@ export function PayoffDashboard() {
         </div>
         
         <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:items-center gap-2 sm:gap-3">
-          {/* Net Liq and Today metrics */}
+          {/* YTD % Return - calculated first for positioning */}
           {accountSummaries && (() => {
             const totalNetLiq = selectedAccount !== 'All' && accountSummaries[selectedAccount]
               ? accountSummaries[selectedAccount].net_liquidation
               : Object.values(accountSummaries).reduce((sum, s) => sum + s.net_liquidation, 0);
+            const totalRealizedPnl = selectedAccount !== 'All' && accountSummaries[selectedAccount]
+              ? accountSummaries[selectedAccount].realized_pnl
+              : Object.values(accountSummaries).reduce((sum, s) => sum + s.realized_pnl, 0);
+            const costBasis = totalNetLiq - portfolioUnrealizedPnl;
+            const totalGain = totalRealizedPnl + portfolioUnrealizedPnl;
+            const ytdPct = costBasis > 0 ? (totalGain / costBasis) * 100 : 0;
             
             return (
               <>
-                {/* Net Liq */}
+                {/* Net Liq - first */}
                 {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Net Liq</div>
@@ -1339,7 +1375,15 @@ export function PayoffDashboard() {
                   </div>
                 )}
                 
-                {/* Today */}
+                {/* YTD % - second */}
+                <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
+                  <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">YTD %</div>
+                  <div className={`text-lg font-bold ${ytdPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {ytdPct >= 0 ? '+' : ''}{ytdPct.toFixed(1)}%
+                  </div>
+                </div>
+                
+                {/* Today - third */}
                 {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
                   <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
@@ -1352,6 +1396,23 @@ export function PayoffDashboard() {
                     <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Today</div>
                     <div className={`text-lg font-bold ${Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0) >= 0 ? '+' : ''}{formatPrivateCurrency(Object.values(accountSummaries).reduce((sum, s) => sum + s.daily_pnl, 0), privacyMode)}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Realized - fourth */}
+                {selectedAccount !== 'All' && accountSummaries[selectedAccount] ? (
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
+                    <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
+                    <div className={`text-lg font-bold ${accountSummaries[selectedAccount].realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {accountSummaries[selectedAccount].realized_pnl >= 0 ? '+' : ''}{formatPrivateCurrency(accountSummaries[selectedAccount].realized_pnl, privacyMode)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-900/80 border border-white/10 rounded-lg px-3 py-2 min-w-[110px]">
+                    <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Realized</div>
+                    <div className={`text-lg font-bold ${totalRealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {totalRealizedPnl >= 0 ? '+' : ''}{formatPrivateCurrency(totalRealizedPnl, privacyMode)}
                     </div>
                   </div>
                 )}
@@ -2144,8 +2205,8 @@ export function PayoffDashboard() {
                           {selectedTicker && currentPrice > 0 && (
                             <div className="space-y-3">
                               <div className="text-sm text-gray-500 uppercase tracking-wider">Quick Trade (Market Order)</div>
-                              <div className="grid grid-cols-5 gap-2">
-                                {[5000, 10000, 25000, 50000, 100000].map((amount) => {
+                              <div className="grid grid-cols-3 gap-2">
+                                {[10000, 50000, 100000].map((amount) => {
                                   const qty = Math.floor(amount / currentPrice);
                                   return qty > 0 ? (
                                     <div key={amount} className="space-y-1">

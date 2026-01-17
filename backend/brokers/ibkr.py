@@ -797,7 +797,23 @@ class IBKRBroker(BrokerInterface):
             "action": order.action,
             "quantity": order.quantity
         }]
+        
+        return self.client.place_options_order(
+            legs=legs,
+            order_type=order.order_type,
+            limit_price=order.limit_price
+        )
 
+    def place_multileg_option_order(self, legs: List[Dict[str, Any]], order_type: str = "MARKET", limit_price: Optional[float] = None) -> Dict[str, Any]:
+        """Place a multi-leg options order through IBKR."""
+        if not self.is_connected():
+            return format_error_response("Not connected to IBKR")
+            
+        return self.client.place_options_order(
+            legs=legs,
+            order_type=order_type,
+            limit_price=limit_price
+        )
         result = self.client.place_options_order(
             legs=legs,
             order_type=order.order_type,

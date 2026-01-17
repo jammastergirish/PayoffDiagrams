@@ -1,44 +1,34 @@
 import os
+import asyncio
+import nest_asyncio
+from contextlib import asynccontextmanager
+from typing import Optional, Literal, List
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from .brokers.ibkr import ib_client, PositionModel
+
+from .config import config
 from .providers.factory import DataProviderFactory
 from .llm_client import analyze_market_news, analyze_ticker_news
+from .common.models import TradeOrder
 from .common.utils import validate_symbol, format_error_response
 from .common.cache import options_cache, historical_cache, snapshot_cache
-import asyncio
-import json
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, Any
-
-from contextlib import asynccontextmanager
-import nest_asyncio
 
 # ============================================
 # PROVIDER CONFIGURATION
 # ============================================
-# DATA_PROVIDER: For historical bars, snapshots, options chain, ticker details
-#   Options: 'massive' (default), 'ibkr'
-# NEWS_PROVIDER: For news headlines and articles (separate from data)
-#   Options: 'massive' (default - Benzinga), 'ibkr' (requires subscription)
-# BROKERAGE_PROVIDER: For positions, P&L, order placement
-#   Options: 'ibkr' (default, only option currently)
-# ============================================
-
 DATA_PROVIDER = os.getenv("DATA_PROVIDER", "massive").lower()
-NEWS_PROVIDER = os.getenv("NEWS_PROVIDER", "massive").lower()  # Separate for news
+NEWS_PROVIDER = os.getenv("NEWS_PROVIDER", "massive").lower()
 BROKERAGE_PROVIDER = os.getenv("BROKERAGE_PROVIDER", "ibkr").lower()
 
-# Create data provider
+# Create data provider (for routes that use it directly)
 data_provider = DataProviderFactory.create(DATA_PROVIDER)
 if data_provider is None:
     print(f"WARNING: Unknown DATA_PROVIDER '{DATA_PROVIDER}', falling back to 'massive'")
     DATA_PROVIDER = "massive"
     data_provider = DataProviderFactory.create("massive")
 
-# Create separate news provider (allows mixing e.g., IBKR data + Massive news)
+# Create separate news provider
 news_provider = DataProviderFactory.create(NEWS_PROVIDER)
 if news_provider is None:
     print(f"WARNING: Unknown NEWS_PROVIDER '{NEWS_PROVIDER}', falling back to 'massive'")
@@ -47,23 +37,27 @@ if news_provider is None:
 
 print(f"Providers: data={DATA_PROVIDER}, news={NEWS_PROVIDER}, brokerage={BROKERAGE_PROVIDER}")
 
-# Patch asyncio to allow nested event loops (required for ib_insync + uvicorn)
+# Patch asyncio to allow nested event loops
 nest_asyncio.apply()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    asyncio.create_task(ib_client.connect())
+    broker = config.broker
+    if broker:
+        # Run connect in background
+        asyncio.create_task(broker.connect())
     yield
     # Shutdown
-    ib_client.disconnect()
+    if config.broker:
+        config.broker.disconnect()
 
 app = FastAPI(lifespan=lifespan)
 
 # Allow CORS for local development and LAN access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for LAN access
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,9 +65,15 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
+    broker = config.broker
+    # For stateless data/news providers, we assume they are "ok" if configured.
+    # Future enhancement: Add health_check methods to DataProviderInterface.
     return {
         "status": "ok", 
-        "ib_connected": ib_client.ib.isConnected(),
+        "broker_connected": broker.is_connected() if broker else False,
+        "ib_connected": broker.is_connected() if broker else False, # Keep for backward compat for a moment
+        "data_connected": data_provider is not None,
+        "news_connected": news_provider is not None,
         "providers": {
             "data": DATA_PROVIDER,
             "news": NEWS_PROVIDER,
@@ -89,54 +89,31 @@ def health():
 
 @app.get("/api/portfolio")
 def get_portfolio():
-    if not ib_client.ib.isConnected():
-        return format_error_response("Not connected to IBKR", positions=[])
+    broker = config.broker
+    if not broker or not broker.is_connected():
+        return format_error_response(f"Not connected to {BROKERAGE_PROVIDER.upper()}", positions=[])
     
-    data = ib_client.get_positions()
+    data = broker.get_positions()
     
     if isinstance(data, list):
-        return {"positions": data}
+         # Convert objects to dicts if they aren't already (IBKR broker returns Pydantic/dataclass objects?)
+         # IBKR.get_positions returns List[Position] object.
+         # Fastapi handles dataclass serialization automatically usually, but let's be safe
+         return {"positions": data}
     return data
-
-
-# Trade Order Model
-from typing import Optional, Literal
-
-class TradeOrder(BaseModel):
-    symbol: str
-    action: Literal["BUY", "SELL"]
-    quantity: int
-    order_type: Literal["MARKET", "LIMIT"]
-    limit_price: Optional[float] = None
-
 
 @app.post("/api/trade")
 def place_trade(order: TradeOrder):
     """
-    Place a stock order through IBKR.
-    
-    Args:
-        order: TradeOrder with symbol, action, quantity, order_type, and optional limit_price
-    
-    Returns:
-        Order result with success status, order_id, and message/error
+    Place a stock order through configured broker.
     """
-    if not ib_client.ib.isConnected():
-        return format_error_response("Not connected to IBKR", success=False)
+    broker = config.broker
+    if not broker or not broker.is_connected():
+        return format_error_response(f"Not connected to {BROKERAGE_PROVIDER.upper()}", success=False)
     
-    result = ib_client.place_order(
-        symbol=order.symbol,
-        action=order.action,
-        quantity=order.quantity,
-        order_type=order.order_type,
-        limit_price=order.limit_price
-    )
-    
+    result = broker.place_stock_order(order)
     return result
 
-
-# Options Trade Order Model
-from typing import List
 
 class OptionLeg(BaseModel):
     symbol: str
@@ -145,6 +122,7 @@ class OptionLeg(BaseModel):
     right: Literal["C", "P"]
     action: Literal["BUY", "SELL"]
     quantity: int
+
 
 class OptionsTradeOrder(BaseModel):
     legs: List[OptionLeg]
@@ -155,23 +133,17 @@ class OptionsTradeOrder(BaseModel):
 @app.post("/api/options/trade")
 def place_options_trade(order: OptionsTradeOrder):
     """
-    Place an options order through IBKR.
-    
-    Supports single-leg orders and multi-leg combos (spreads, etc.)
-    
-    Args:
-        order: OptionsTradeOrder with legs, order_type, and optional limit_price
-    
-    Returns:
-        Order result with success status, order_id, and message/error
+    Place an options order through configured broker.
     """
-    if not ib_client.ib.isConnected():
-        return format_error_response("Not connected to IBKR", success=False)
+    broker = config.broker
+    if not broker or not broker.is_connected():
+        return format_error_response(f"Not connected to {BROKERAGE_PROVIDER.upper()}", success=False)
     
-    # Convert Pydantic models to dicts for the IB client
+    # Convert Pydantic models to dicts
     legs_data = [leg.model_dump() for leg in order.legs]
     
-    result = ib_client.place_options_order(
+    # Use multi-leg method on broker interface
+    result = broker.place_multileg_option_order(
         legs=legs_data,
         order_type=order.order_type,
         limit_price=order.limit_price

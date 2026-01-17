@@ -13,7 +13,7 @@ class Config:
 
     def __init__(self):
         # Read from environment variables with defaults
-        self.broker_name = os.getenv("BROKER", "ibkr")
+        self.broker_name = os.getenv("BROKERAGE_PROVIDER", "ibkr")
         self.data_provider_name = os.getenv("DATA_PROVIDER", "massive")
 
         # Broker settings

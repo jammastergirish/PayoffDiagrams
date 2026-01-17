@@ -4,6 +4,7 @@ from typing import Optional
 from .base import DataProviderInterface
 from .massive import MassiveProvider
 from .ibkr import IBKRProvider
+from .alpaca import AlpacaProvider
 
 
 class DataProviderFactory:
@@ -12,6 +13,7 @@ class DataProviderFactory:
     _providers = {
         "massive": MassiveProvider,
         "ibkr": IBKRProvider,
+        "alpaca": AlpacaProvider,
         # Future providers can be added here:
         # "polygon": PolygonProvider,
         # "alpha_vantage": AlphaVantageProvider,
