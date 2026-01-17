@@ -1416,6 +1416,8 @@ export function PayoffDashboard() {
                     </div>
                   </div>
                 )}
+                
+
               </>
             );
           })()}
@@ -2362,12 +2364,12 @@ export function PayoffDashboard() {
                             </div>
                             {tradeOrderType === "MARKET" && currentPrice > 0 && (
                               <div className="text-sm text-gray-500 mt-1">
-                                Est. Value: {formatCurrency(tradeQuantity * currentPrice, 2)}
+                                Est. Value: {formatCurrency(tradeQuantity * currentPrice, true)}
                               </div>
                             )}
                             {tradeOrderType === "LIMIT" && tradeLimitPrice && parseFloat(tradeLimitPrice) > 0 && (
                               <div className="text-sm text-gray-500 mt-1">
-                                Est. Value: {formatCurrency(tradeQuantity * parseFloat(tradeLimitPrice), 2)}
+                                Est. Value: {formatCurrency(tradeQuantity * parseFloat(tradeLimitPrice), true)}
                               </div>
                             )}
                           </div>

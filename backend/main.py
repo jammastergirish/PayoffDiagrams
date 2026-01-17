@@ -94,12 +94,19 @@ def get_portfolio():
         return format_error_response(f"Not connected to {BROKERAGE_PROVIDER.upper()}", positions=[])
     
     data = broker.get_positions()
+    summary = broker.get_account_summary()
     
     if isinstance(data, list):
          # Convert objects to dicts if they aren't already (IBKR broker returns Pydantic/dataclass objects?)
          # IBKR.get_positions returns List[Position] object.
          # Fastapi handles dataclass serialization automatically usually, but let's be safe
-         return {"positions": data}
+         return {"positions": data, "summary": summary}
+         
+    # If data is already a dict, merge summary
+    if isinstance(data, dict):
+        data["summary"] = summary
+        return data
+        
     return data
 
 @app.post("/api/trade")

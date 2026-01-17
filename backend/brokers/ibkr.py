@@ -117,17 +117,33 @@ class IBClient:
     def _ensure_account_summary(self):
         if not self.ib.isConnected():
             return
-        if self._account_summary_started:
-            return
-        try:
-            self.ib.client.reqAccountSummary(
-                self._account_summary_req_id,
-                self._account_summary_group,
-                self._account_summary_tags
-            )
-            self._account_summary_started = True
-        except Exception as e:
-            print(f"Error requesting account summary: {e}")
+            
+        # Start request if not started
+        if not self._account_summary_started:
+            try:
+                print("DEBUG: Requesting Account Summary...")
+                self.ib.client.reqAccountSummary(
+                    self._account_summary_req_id,
+                    self._account_summary_group,
+                    self._account_summary_tags
+                )
+                self._account_summary_started = True
+            except Exception as e:
+                print(f"Error requesting account summary: {e}")
+                
+        # Wait for data to populate (especially NetLiquidation)
+        # Give it up to 2 seconds to arrive
+        for _ in range(20): 
+            if self.ib.wrapper.acctSummary:
+                # Check if we have NetLiquidation for any account
+                # acctSummary is a dict keyed by (account, tag)
+                values = self.ib.wrapper.acctSummary.values()
+                if any(v.tag == 'NetLiquidation' for v in values):
+                    # Data arrived!
+                    return
+            self.ib.sleep(0.1)
+            
+        print("WARNING: Account Summary data timed out or incomplete")
 
     def _ensure_pnl_subscription(self, account: str):
         """Subscribe to P&L updates for an account using reqPnL.
